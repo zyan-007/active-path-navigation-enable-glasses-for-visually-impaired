@@ -21,11 +21,26 @@ void setup() {
 
 void loop() {
   // put your main code here, to run repeatedly:
-  if (digitalRead(4) == HIGH){
-    Serial.println("YES");
+  if (digitalRead(TRIGGER) == HIGH){
+    Serial.println("Trigger pressed");
+  }
+  else if (digitalRead(BUTTON1) == HIGH){
+    Serial.println("button1 pressed");
+  }
+  else if (digitalRead(BUTTON2) == HIGH){
+    Serial.println("button2 pressed");
+  }
+  else if (digitalRead(BUTTON3) == HIGH){
+    Serial.println("button3 pressed");
+  }
+  else if (digitalRead(BUTTON4) == HIGH){
+    Serial.println("button4 pressed");
+  }
+  else if (digitalRead(BUTTON5) == HIGH){
+    Serial.println("button5 pressed");
   }
   else{
-    Serial.println("NO");
+    Serial.println("Nothing pressed");
   }
   delay(100);
 }
