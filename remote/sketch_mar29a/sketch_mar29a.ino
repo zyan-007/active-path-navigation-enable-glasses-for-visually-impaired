@@ -9,6 +9,14 @@
 void setup() {
   // begin serial communication
   Serial.begin(9600);
+
+  // setup input buttons
+  pinMode(TRIGGER, INPUT_PULLUP);
+  pinMode(BUTTON1, INPUT_PULLUP);
+  pinMode(BUTTON2, INPUT_PULLUP);
+  pinMode(BUTTON3, INPUT_PULLUP);
+  pinMode(BUTTON4, INPUT_PULLUP);
+  pinMode(BUTTON5, INPUT_PULLUP);
 }
 
 void loop() {
