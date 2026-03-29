@@ -1,6 +1,13 @@
+#define TRIGGER 4
+#define BUTTON1 5
+#define BUTTON2 18
+#define BUTTON3 19
+#define BUTTON4 21
+#define BUTTON5 22
+
+
 void setup() {
-  // put your setup code here, to run once:
-  pinMode(4, INPUT_PULLUP); // enable internal pull-up
+  // begin serial communication
   Serial.begin(9600);
 }
 
