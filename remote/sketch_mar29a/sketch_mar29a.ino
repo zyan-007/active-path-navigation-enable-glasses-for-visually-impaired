@@ -21,25 +21,25 @@ void setup() {
 
 void loop() {
   // put your main code here, to run repeatedly:
-  if (digitalRead(TRIGGER) == HIGH){
+  if (digitalRead(TRIGGER) == HIGH){ // trigger "ok" button
     Serial.println("Trigger pressed");
   }
-  else if (digitalRead(BUTTON1) == HIGH){
+  else if (digitalRead(BUTTON1) == HIGH){ // button1 - active path navigation
     Serial.println("button1 pressed");
   }
-  else if (digitalRead(BUTTON2) == HIGH){
+  else if (digitalRead(BUTTON2) == HIGH){ // button2 - face registration
     Serial.println("button2 pressed");
   }
-  else if (digitalRead(BUTTON3) == HIGH){
+  else if (digitalRead(BUTTON3) == HIGH){ // button3 - currency identification
     Serial.println("button3 pressed");
   }
-  else if (digitalRead(BUTTON4) == HIGH){
+  else if (digitalRead(BUTTON4) == HIGH){ // button4 - test-to-speech
     Serial.println("button4 pressed");
   }
-  else if (digitalRead(BUTTON5) == HIGH){
+  else if (digitalRead(BUTTON5) == HIGH){ // button5 - world description (api call)
     Serial.println("button5 pressed");
   }
-  else{
+  else{ // nothing is pressed
     Serial.println("Nothing pressed");
   }
   delay(100);
