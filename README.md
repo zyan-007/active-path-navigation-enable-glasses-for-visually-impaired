@@ -3,7 +3,7 @@ made by zyan
 This repo has the code for the glasses for visually impaired. It contains code for both the remote and the glasses it self.
 
 
-Remote
+Remote: transmission over bluetooth or wifi
 1. it contains 5 buttons:
         a. BUTTON1
         b. BUTTON2
