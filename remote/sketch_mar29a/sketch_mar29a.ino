@@ -1,9 +1,9 @@
-#define TRIGGER 4
-#define BUTTON1 5
-#define BUTTON2 18
-#define BUTTON3 19
-#define BUTTON4 21
-#define BUTTON5 22
+#define TRIGGER 4 // ok button
+#define BUTTON1 5 // active path navigation
+#define BUTTON2 18 // face registration and recognition
+#define BUTTON3 19 // currency identification
+#define BUTTON4 21 // text-to-speech 
+#define BUTTON5 22 // world description
 
 
 void setup() {
