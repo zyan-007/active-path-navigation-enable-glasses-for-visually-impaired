@@ -1,3 +1,7 @@
+/*
+over bluetooth signals are being transmitted to a raspberrypi telling which button is pressed
+*/
+
 #define TRIGGER 4 // ok button
 #define BUTTON1 5 // active path navigation
 #define BUTTON2 18 // face registration and recognition
