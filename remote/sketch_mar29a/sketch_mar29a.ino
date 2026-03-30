@@ -20,7 +20,7 @@ void setup() {
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
+
   if (digitalRead(TRIGGER) == HIGH){ // trigger "ok" button
     Serial.println("Trigger pressed");
   }
