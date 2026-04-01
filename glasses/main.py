@@ -1,3 +1,4 @@
+'''just a normal test program to open camera, not yet tested on raspberry pi'''
 import cv2
 
 cap = cv2.VideoCapture(0)  # 0 = default camera (your laptop webcam)
