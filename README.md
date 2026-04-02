@@ -14,4 +14,5 @@ Remote: transmission over bluetooth or wifi
 
 
 glasses:
-1. active path navigation
+1. active path navigation: using yolo for detection, and directing the user to walk accordingly
+currently accuracy is not there, maybe edge detection needs to be worked on.
