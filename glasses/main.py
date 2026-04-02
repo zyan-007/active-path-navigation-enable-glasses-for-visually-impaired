@@ -1,29 +1,20 @@
-'''just a normal test program to open camera, not yet tested on raspberry pi'''
-import cv2
-
-cap = cv2.VideoCapture(0)  # 0 = default camera (your laptop webcam)
-
-if not cap.isOpened():
-    print("Camera not found!")
-else:
-    print("Camera working! Press Q to quit.")
 '''
-Obstacle Detection - Camera Test with YOLO
-Test on Windows first, then pull to Pi and swap comments
+Active Path Navigation - Obstacle Detection
+Windows: uses default backend
+Pi: uncomment CAP_V4L2 line
 '''
 
 import cv2
 from ultralytics import YOLO
 
-# Load YOLOv8 nano model (smallest and fastest, good for Pi)
-# First run will auto download the model weights (~6MB)
+# Load YOLOv8 nano model
 model = YOLO('yolov8n.pt')
 
 # ── CAMERA SETUP ──────────────────────────────────────────────────────────────
-# Windows - comment this out when running on Pi
+# Windows
 cap = cv2.VideoCapture(0)
 
-# Raspberry Pi - uncomment this when running on Pi, comment out Windows line above
+# Raspberry Pi - uncomment below, comment above
 # cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -43,52 +34,89 @@ while True:
         print("Failed to grab frame")
         break
 
+    frame_width = frame.shape[1]  # total width of frame in pixels
+
+    # ── ZONE BOUNDARIES ───────────────────────────────────────────────────────
+    # Divide frame into 3 equal zones
+    left_boundary  = frame_width // 3        # 0 to 213
+    right_boundary = (frame_width * 2) // 3  # 213 to 426, 426 to 640
+
+    # Draw zone lines on frame (visual reference)
+    cv2.line(frame, (left_boundary, 0),  (left_boundary, 480),  (255, 0, 0), 2)
+    cv2.line(frame, (right_boundary, 0), (right_boundary, 480), (255, 0, 0), 2)
+
+    # Zone labels on frame
+    cv2.putText(frame, "LEFT",   (10, 30),               cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
+    cv2.putText(frame, "CENTER", (left_boundary + 10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
+    cv2.putText(frame, "RIGHT",  (right_boundary + 10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
+    # ─────────────────────────────────────────────────────────────────────────
+
     # ── YOLO DETECTION ────────────────────────────────────────────────────────
-    results = model(frame, verbose=False)  # verbose=False stops YOLO spamming terminal
+    results = model(frame, verbose=False)
+
+    obstacle_left   = False
+    obstacle_center = False
+    obstacle_right  = False
 
     for result in results:
         for box in result.boxes:
-            # Get confidence score
             confidence = float(box.conf[0])
 
-            # Only process if confidence is above 50%
             if confidence < 0.5:
                 continue
 
-            # Get bounding box coordinates
             x1, y1, x2, y2 = map(int, box.xyxy[0])
-
-            # Get class name (person, chair, car etc.)
-            class_id = int(box.cls[0])
+            class_id   = int(box.cls[0])
             class_name = model.names[class_id]
 
-            # Draw box around detected object
+            # Find center X of the detected object
+            center_x = (x1 + x2) // 2
+
+            # Determine which zone the object is in
+            if center_x < left_boundary:
+                zone = "LEFT"
+                obstacle_left = True
+            elif center_x > right_boundary:
+                zone = "RIGHT"
+                obstacle_right = True
+            else:
+                zone = "CENTER"
+                obstacle_center = True
+
+            # Draw box around object
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
 
-            # Write label above the box
-            label = f"{class_name} {confidence:.0%}"
+            # Label with name, confidence, zone
+            label = f"{class_name} {confidence:.0%} [{zone}]"
             cv2.putText(frame, label, (x1, y1 - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-
-            # Print to console
-            print(f"Detected: {class_name} | Confidence: {confidence:.0%}")
     # ─────────────────────────────────────────────────────────────────────────
 
-    cv2.imshow("Obstacle Detection", frame)
+    # ── NAVIGATION LOGIC ──────────────────────────────────────────────────────
+    if obstacle_center and obstacle_left and obstacle_right:
+        instruction = "STOP - Obstacles everywhere"
+    elif obstacle_center and obstacle_left:
+        instruction = "Move RIGHT - Obstacle ahead and on left"
+    elif obstacle_center and obstacle_right:
+        instruction = "Move LEFT - Obstacle ahead and on right"
+    elif obstacle_center:
+        instruction = "STOP - Obstacle directly ahead"
+    elif obstacle_left:
+        instruction = "Move RIGHT - Obstacle on left"
+    elif obstacle_right:
+        instruction = "Move LEFT - Obstacle on right"
+    else:
+        instruction = "Path Clear"
+    # ─────────────────────────────────────────────────────────────────────────
 
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
+    # Print instruction to console
+    print(f">> {instruction}")
 
-cap.release()
-cv2.destroyAllWindows()
-while True:
-    ret, frame = cap.read()
-    
-    if not ret:
-        print("Failed to grab frame")
-        break
+    # Show instruction on frame
+    cv2.putText(frame, instruction, (10, 460),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
-    cv2.imshow("Camera Feed", frame)
+    cv2.imshow("Active Path Navigation", frame)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
