@@ -1,50 +1,79 @@
 /*
-over bluetooth signals are being transmitted to a raspberrypi telling which button is pressed
+  ESP32 Remote - Hardware Test
+  Tests all buttons and LEDs
+  Press any button - serial monitor shows which one
+  Both LEDs glow on startup to confirm they work
 */
 
-#define TRIGGER 4 // ok button
-#define BUTTON1 5 // active path navigation
-#define BUTTON2 18 // face registration and recognition
-#define BUTTON3 19 // currency identification
-#define BUTTON4 21 // text-to-speech 
-#define BUTTON5 22 // world description
+// ── PIN DEFINITIONS ───────────────────────────────────────────────────────────
+#define TRIGGER  4   // ok / confirm button
+#define BUTTON1  5   // active path navigation
+#define BUTTON2  18  // face registration and recognition
+#define BUTTON3  19  // currency identification
+#define BUTTON4  21  // text-to-speech
+#define BUTTON5  22  // world description
 
+#define LED_RED   2   // red led
+#define LED_GREEN 15  // green led
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── DEBOUNCE ──────────────────────────────────────────────────────────────────
+unsigned long lastPressTime = 0;
+#define DEBOUNCE_MS 300
+
+bool debounce() {
+  unsigned long now = millis();
+  if (now - lastPressTime > DEBOUNCE_MS) {
+    lastPressTime = now;
+    return true;
+  }
+  return false;
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 void setup() {
-  // begin serial communication
   Serial.begin(9600);
 
-  // setup input buttons
+  // ── BUTTON PINS ───────────────────────────────────────────────────────────
   pinMode(TRIGGER, INPUT_PULLUP);
   pinMode(BUTTON1, INPUT_PULLUP);
   pinMode(BUTTON2, INPUT_PULLUP);
   pinMode(BUTTON3, INPUT_PULLUP);
   pinMode(BUTTON4, INPUT_PULLUP);
   pinMode(BUTTON5, INPUT_PULLUP);
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // ── LED PINS ──────────────────────────────────────────────────────────────
+  pinMode(LED_RED,   OUTPUT);
+  pinMode(LED_GREEN, OUTPUT);
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // ── STARTUP - both LEDs glow to confirm they work ─────────────────────────
+  digitalWrite(LED_RED,   HIGH);
+  digitalWrite(LED_GREEN, HIGH);
+  Serial.println("Hardware test ready - press any button");
+  // ─────────────────────────────────────────────────────────────────────────
 }
 
 void loop() {
+  if (digitalRead(TRIGGER) == LOW && debounce()) {
+    Serial.println("TRIGGER pressed - ok / confirm");
+  }
+  else if (digitalRead(BUTTON1) == LOW && debounce()) {
+    Serial.println("BUTTON1 pressed - active path navigation");
+  }
+  else if (digitalRead(BUTTON2) == LOW && debounce()) {
+    Serial.println("BUTTON2 pressed - face registration and recognition");
+  }
+  else if (digitalRead(BUTTON3) == LOW && debounce()) {
+    Serial.println("BUTTON3 pressed - currency identification");
+  }
+  else if (digitalRead(BUTTON4) == LOW && debounce()) {
+    Serial.println("BUTTON4 pressed - text-to-speech");
+  }
+  else if (digitalRead(BUTTON5) == LOW && debounce()) {
+    Serial.println("BUTTON5 pressed - world description");
+  }
 
-  if (digitalRead(TRIGGER) == HIGH){ // trigger "ok" button
-    Serial.println("Trigger pressed");
-  }
-  else if (digitalRead(BUTTON1) == HIGH){ // button1 - active path navigation
-    Serial.println("button1 pressed");
-  }
-  else if (digitalRead(BUTTON2) == HIGH){ // button2 - face registration
-    Serial.println("button2 pressed");
-  }
-  else if (digitalRead(BUTTON3) == HIGH){ // button3 - currency identification
-    Serial.println("button3 pressed");
-  }
-  else if (digitalRead(BUTTON4) == HIGH){ // button4 - test-to-speech
-    Serial.println("button4 pressed");
-  }
-  else if (digitalRead(BUTTON5) == HIGH){ // button5 - world description (api call)
-    Serial.println("button5 pressed");
-  }
-  else{ // nothing is pressed
-    Serial.println("Nothing pressed");
-  }
-  delay(100); // delay of 100 ms
+  delay(10);
 }
