@@ -1,20 +1,15 @@
 /*
-  ESP32 Remote - Hardware Test
-  Tests all buttons and LEDs
+  ESP32 Remote - Button Test
   Press any button - serial monitor shows which one
-  Both LEDs glow on startup to confirm they work
 */
 
 // ── PIN DEFINITIONS ───────────────────────────────────────────────────────────
 #define TRIGGER  4   // ok / confirm button
 #define BUTTON1  5   // active path navigation
 #define BUTTON2  18  // face registration and recognition
-#define BUTTON3  19  // currency identification
-#define BUTTON4  21  // text-to-speech
-#define BUTTON5  22  // world description
-
-#define LED_RED   2   // red led
-#define LED_GREEN 15  // green led
+#define BUTTON3  13  // currency identification
+#define BUTTON4  32  // text-to-speech
+#define BUTTON5  14  // world description
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── DEBOUNCE ──────────────────────────────────────────────────────────────────
@@ -34,25 +29,14 @@ bool debounce() {
 void setup() {
   Serial.begin(9600);
 
-  // ── BUTTON PINS ───────────────────────────────────────────────────────────
   pinMode(TRIGGER, INPUT_PULLUP);
   pinMode(BUTTON1, INPUT_PULLUP);
   pinMode(BUTTON2, INPUT_PULLUP);
   pinMode(BUTTON3, INPUT_PULLUP);
   pinMode(BUTTON4, INPUT_PULLUP);
   pinMode(BUTTON5, INPUT_PULLUP);
-  // ─────────────────────────────────────────────────────────────────────────
 
-  // ── LED PINS ──────────────────────────────────────────────────────────────
-  pinMode(LED_RED,   OUTPUT);
-  pinMode(LED_GREEN, OUTPUT);
-  // ─────────────────────────────────────────────────────────────────────────
-
-  // ── STARTUP - both LEDs glow to confirm they work ─────────────────────────
-  digitalWrite(LED_RED,   HIGH);
-  digitalWrite(LED_GREEN, HIGH);
-  Serial.println("Hardware test ready - press any button");
-  // ─────────────────────────────────────────────────────────────────────────
+  Serial.println("Button test ready - press any button");
 }
 
 void loop() {
