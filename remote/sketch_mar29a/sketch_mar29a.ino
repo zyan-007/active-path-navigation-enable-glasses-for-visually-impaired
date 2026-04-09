@@ -1,6 +1,7 @@
 /*
-  ESP32 Remote - Button Test
+  ESP32 Remote - Button + LED Test
   Press any button - serial monitor shows which one
+  Both LEDs glow on startup to confirm they work
 */
 
 // ── PIN DEFINITIONS ───────────────────────────────────────────────────────────
@@ -10,6 +11,9 @@
 #define BUTTON3  13  // currency identification
 #define BUTTON4  32  // text-to-speech
 #define BUTTON5  14  // world description
+
+#define LED_RED   26  // red led
+#define LED_GREEN 27  // green led
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── DEBOUNCE ──────────────────────────────────────────────────────────────────
@@ -29,14 +33,23 @@ bool debounce() {
 void setup() {
   Serial.begin(9600);
 
+  // ── BUTTON PINS ───────────────────────────────────────────────────────────
   pinMode(TRIGGER, INPUT_PULLUP);
   pinMode(BUTTON1, INPUT_PULLUP);
   pinMode(BUTTON2, INPUT_PULLUP);
   pinMode(BUTTON3, INPUT_PULLUP);
   pinMode(BUTTON4, INPUT_PULLUP);
   pinMode(BUTTON5, INPUT_PULLUP);
+  // ─────────────────────────────────────────────────────────────────────────
 
-  Serial.println("Button test ready - press any button");
+  // ── LED PINS ──────────────────────────────────────────────────────────────
+  pinMode(LED_RED,   OUTPUT);
+  pinMode(LED_GREEN, OUTPUT);
+  digitalWrite(LED_RED,   HIGH);  // both on at startup
+  digitalWrite(LED_GREEN, HIGH);
+  // ─────────────────────────────────────────────────────────────────────────
+
+  Serial.println("Button + LED test ready - press any button");
 }
 
 void loop() {
