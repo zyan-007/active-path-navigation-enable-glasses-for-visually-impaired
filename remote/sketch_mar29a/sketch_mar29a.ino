@@ -1,7 +1,8 @@
 /*
-  ESP32 Remote - Button + LED Test
+  ESP32 Remote - Button + LED + Buzzer Test
+  Both LEDs glow on startup
+  Long beep on startup
   Press any button - serial monitor shows which one
-  Both LEDs glow on startup to confirm they work
 */
 
 // ── PIN DEFINITIONS ───────────────────────────────────────────────────────────
@@ -14,6 +15,7 @@
 
 #define LED_RED   26  // red led
 #define LED_GREEN 27  // green led
+#define BUZZER    25  // active buzzer
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── DEBOUNCE ──────────────────────────────────────────────────────────────────
@@ -49,7 +51,14 @@ void setup() {
   digitalWrite(LED_GREEN, HIGH);
   // ─────────────────────────────────────────────────────────────────────────
 
-  Serial.println("Button + LED test ready - press any button");
+  // ── BUZZER PIN ────────────────────────────────────────────────────────────
+  pinMode(BUZZER, OUTPUT);
+  digitalWrite(BUZZER, HIGH);  // long beep on startup
+  delay(1000);                 // beep for 1 second
+  digitalWrite(BUZZER, LOW);  // stop beep
+  // ─────────────────────────────────────────────────────────────────────────
+
+  Serial.println("Ready - press any button");
 }
 
 void loop() {
