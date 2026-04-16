@@ -1,14 +1,10 @@
 '''
-Raspberry Pi - WiFi TCP Client
-Clean rewrite - one thing at a time
-1. Check button confirms earphones
-2. Wait for ESP32 hotspot
-3. Connect and listen for button presses
-4. Speak which button was pressed
+Raspberry Pi - Assistive Glasses
+WiFi TCP Client - Clean Version
 '''
 
 import socket
-import subprocess
+import os
 import RPi.GPIO as GPIO
 import time
 
@@ -73,9 +69,7 @@ def all_off():
 
 def speak(text):
     print(f">> {text}")
-    subprocess.run(['pkill', 'espeak'], capture_output=True)
-    time.sleep(0.1)
-    subprocess.Popen(['espeak', '-s', '140', text])
+    os.system(f'espeak -s 140 "{text}"')
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── PHASE 1 - WAIT FOR CHECK BUTTON ──────────────────────────────────────────
@@ -99,39 +93,36 @@ def phase1_wait_for_check_button():
 # ── PHASE 2 - WAIT FOR ESP32 HOTSPOT ─────────────────────────────────────────
 def phase2_wait_for_hotspot():
     print("Phase 2: waiting for ESP32 hotspot")
-    speak("Searching for remote")
     red_on()
 
     while True:
-        result = subprocess.run(
-            ['ping', '-c', '1', '-W', '2', ESP32_IP],
-            capture_output=True
-        )
-        if result.returncode == 0:
+        result = os.system(f'ping -c 1 -W 2 {ESP32_IP} > /dev/null 2>&1')
+        if result == 0:
             print("Hotspot found")
             return
         print("Hotspot not found, retrying...")
         time.sleep(2)
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ── PHASE 3 - CONNECT TO ESP32 ────────────────────────────────────────────────
+# ── PHASE 3 - CONNECT AND LISTEN ─────────────────────────────────────────────
 def phase3_connect():
     print("Phase 3: connecting to ESP32")
 
     while True:
         sock = None
+
         try:
+            # ── CONNECT ───────────────────────────────────────────────────────
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(5)
             sock.connect((ESP32_IP, PORT))
             sock.settimeout(None)
 
-            # connected
             green_on()
             speak("Remote connected. Please select a mode.")
             print("Connected to ESP32")
 
-            # ── LISTEN FOR BUTTON PRESSES ─────────────────────────────────────
+            # ── LISTEN ────────────────────────────────────────────────────────
             buffer = ""
             while True:
                 data = sock.recv(1024)
@@ -155,7 +146,6 @@ def phase3_connect():
                         speak(BUTTON_MESSAGES[signal])
                     else:
                         print(f"Unknown: '{signal}'")
-            # ─────────────────────────────────────────────────────────────────
 
         except Exception as e:
             print(f"Error: {e}")
@@ -168,9 +158,10 @@ def phase3_connect():
                 except:
                     pass
 
-        # disconnected - wait for hotspot to come back then retry
-        print("Reconnecting...")
+        # ── RECONNECT ─────────────────────────────────────────────────────────
+        print("Disconnected - waiting for hotspot")
         speak("Remote disconnected")
+        time.sleep(2)
         phase2_wait_for_hotspot()
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -178,6 +169,7 @@ def phase3_connect():
 def main():
     phase1_wait_for_check_button()
     phase2_wait_for_hotspot()
+    speak("Searching for remote")
     phase3_connect()
 
 try:
