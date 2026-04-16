@@ -1,29 +1,25 @@
 '''
-Raspberry Pi - BLE Listener with LED and Buzzer
-Boot sequence:
-1. RED on, BUZZER beeps at intervals - waiting for check button
-2. Check button pressed - long beep, starts BLE scan
-3. BLE connected - RED off, GREEN on, Audio: "Remote connected"
-4. If disconnected - RED on, GREEN off, restart scan
+Raspberry Pi - WiFi TCP Client
+Connects to ESP32 hotspot automatically
+Receives button signals and speaks them
 '''
 
-import asyncio
+import socket
 import subprocess
 import RPi.GPIO as GPIO
-import threading
 import time
-from bleak import BleakScanner, BleakClient
+import threading
+
+# ── NETWORK DEFINITIONS ───────────────────────────────────────────────────────
+ESP32_IP   = "192.168.4.1"
+PORT       = 8080
+# ─────────────────────────────────────────────────────────────────────────────
 
 # ── PIN DEFINITIONS ───────────────────────────────────────────────────────────
 LED_RED      = 17
 LED_GREEN    = 22
 BUZZER       = 24
 CHECK_BUTTON = 27
-# ─────────────────────────────────────────────────────────────────────────────
-
-# ── BLE DEFINITIONS ───────────────────────────────────────────────────────────
-DEVICE_NAME         = "Assistive-Glasses-Remote"
-CHARACTERISTIC_UUID = "abcd1234-ab12-ab12-ab12-abcdef123456"
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── BUTTON MESSAGES ───────────────────────────────────────────────────────────
@@ -37,16 +33,18 @@ BUTTON_MESSAGES = {
 }
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ── STATE ─────────────────────────────────────────────────────────────────────
+is_connected = False
+# ─────────────────────────────────────────────────────────────────────────────
+
 # ── GPIO SETUP ────────────────────────────────────────────────────────────────
 GPIO.setmode(GPIO.BCM)
 GPIO.setwarnings(False)
-
 GPIO.setup(LED_RED,      GPIO.OUT)
 GPIO.setup(LED_GREEN,    GPIO.OUT)
 GPIO.setup(BUZZER,       GPIO.OUT)
 GPIO.setup(CHECK_BUTTON, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
-# all off at start
 GPIO.output(LED_RED,   GPIO.LOW)
 GPIO.output(LED_GREEN, GPIO.LOW)
 GPIO.output(BUZZER,    GPIO.LOW)
@@ -70,12 +68,12 @@ def all_leds_off():
     GPIO.output(LED_GREEN, GPIO.LOW)
 
 def set_searching():
-    # red on, green off - searching for remote
-    GPIO.output(LED_RED,   GPIO.HIGH)
-    GPIO.output(LED_GREEN, GPIO.LOW)
+    global is_connected
+    if not is_connected:
+        GPIO.output(LED_RED,   GPIO.HIGH)
+        GPIO.output(LED_GREEN, GPIO.LOW)
 
 def set_connected():
-    # green on, red off - remote connected
     GPIO.output(LED_RED,   GPIO.LOW)
     GPIO.output(LED_GREEN, GPIO.HIGH)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -83,38 +81,23 @@ def set_connected():
 # ── SPEAK ─────────────────────────────────────────────────────────────────────
 def speak(text):
     print(f">> {text}")
-    subprocess.Popen(['espeak', text])
-# ─────────────────────────────────────────────────────────────────────────────
-
-# ── NOTIFICATION HANDLER ──────────────────────────────────────────────────────
-def on_button_press(sender, data):
-    signal = data.decode('utf-8').strip()
-    print(f"Received signal: {signal}")
-    if signal in BUTTON_MESSAGES:
-        speak(BUTTON_MESSAGES[signal])
-    else:
-        print(f"Unknown signal: {signal}")
-# ─────────────────────────────────────────────────────────────────────────────
-
-# ── DISCONNECT CALLBACK ───────────────────────────────────────────────────────
-def on_disconnect(client):
-    print("Remote disconnected")
-    set_searching()  # red on green off
-    speak("Remote disconnected. Searching again.")
+    subprocess.run(['pkill', 'espeak'], capture_output=True)
+    time.sleep(0.1)
+    subprocess.Popen(['espeak', '-s', '140', text])
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── PHASE 1 - WAIT FOR CHECK BUTTON ──────────────────────────────────────────
 def wait_for_check_button():
-    print("Waiting for earphones and check button press...")
+    print("Waiting for check button press...")
     all_leds_off()
-    GPIO.output(LED_RED, GPIO.HIGH)  # red on while waiting
+    GPIO.output(LED_RED, GPIO.HIGH)
 
     while True:
         beep(duration=0.2)
-        time.sleep(0.8)  # beep every second
+        time.sleep(0.8)
 
         if GPIO.input(CHECK_BUTTON) == GPIO.LOW:
-            time.sleep(0.05)  # debounce
+            time.sleep(0.05)
             if GPIO.input(CHECK_BUTTON) == GPIO.LOW:
                 print("Check button pressed - earphones confirmed")
                 long_beep()
@@ -122,63 +105,89 @@ def wait_for_check_button():
                 return
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ── PHASE 2 - SCAN AND CONNECT ────────────────────────────────────────────────
-async def connect_to_remote():
+# ── PHASE 2 - WAIT FOR WIFI ───────────────────────────────────────────────────
+def wait_for_wifi():
+    print("Waiting for WiFi connection to ESP32 hotspot...")
+    speak("Waiting for network")
+
     while True:
-        print("Scanning for ESP32 remote...")
-        set_searching()  # red on green off
+        result = subprocess.run(
+            ['ping', '-c', '1', '-W', '1', ESP32_IP],
+            capture_output=True
+        )
+        if result.returncode == 0:
+            print("ESP32 hotspot reachable")
+            return
+        else:
+            print("ESP32 not reachable yet, retrying...")
+            time.sleep(2)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── PHASE 3 - CONNECT AND LISTEN ─────────────────────────────────────────────
+def connect_and_listen():
+    global is_connected
+
+    while True:
+        is_connected = False
+        set_searching()
         speak("Searching for remote")
-
-        target = await BleakScanner.find_device_by_name(DEVICE_NAME, timeout=10)
-
-        if target is None:
-            print("Remote not found, retrying in 3 seconds...")
-            await asyncio.sleep(3)
-            continue
-
-        print(f"Found remote: {target.address}")
-
-        client = BleakClient(target.address, disconnected_callback=on_disconnect)
+        print("Connecting to ESP32...")
 
         try:
-            await client.connect()
-            print("Connected to remote!")
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5)
+            sock.connect((ESP32_IP, PORT))
+            sock.settimeout(None)  # remove timeout after connected
+
+            is_connected = True
             set_connected()  # green on red off
             speak("Remote connected. Please select a mode.")
+            print("Connected to ESP32!")
 
-            await client.start_notify(CHARACTERISTIC_UUID, on_button_press)
+            # listen for button signals
+            while True:
+                data = sock.recv(1024)
+                if not data:
+                    print("Connection lost")
+                    break
 
-            # keep alive loop
-            while client.is_connected:
-                await asyncio.sleep(0.5)
+                signal = data.decode('utf-8').strip()
+                print(f"Received: {signal}")
 
-            print("Connection lost - restarting scan")
-            await asyncio.sleep(2)
+                if signal in BUTTON_MESSAGES:
+                    speak(BUTTON_MESSAGES[signal])
+                else:
+                    print(f"Unknown signal: {signal}")
 
         except Exception as e:
             print(f"Connection error: {e}")
-            set_searching()
-            await asyncio.sleep(3)
 
         finally:
-            if client.is_connected:
-                await client.disconnect()
+            is_connected = False
+            set_searching()
+            try:
+                sock.close()
+            except:
+                pass
+            speak("Remote disconnected. Searching again.")
+            time.sleep(3)
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
-async def main():
-    # phase 1 - wait for check button (runs in sync before async loop)
+def main():
+    # phase 1 - wait for check button
     wait_for_check_button()
 
-    # phase 2 - scan and connect
-    await connect_to_remote()
+    # phase 2 - wait for wifi
+    wait_for_wifi()
+
+    # phase 3 - connect and listen forever
+    connect_and_listen()
 
 try:
-    asyncio.run(main())
-
+    main()
 except KeyboardInterrupt:
     print("Stopped")
-
 finally:
     GPIO.cleanup()
 # ─────────────────────────────────────────────────────────────────────────────

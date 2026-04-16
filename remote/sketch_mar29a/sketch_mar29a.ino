@@ -1,12 +1,16 @@
 /*
-  ESP32 Remote - BLE Button Transmitter
-  Sends button press over BLE to Raspberry Pi automatically
+  ESP32 Remote - WiFi Hotspot + TCP Server
+  ESP32 creates hotspot, Pi connects to it
+  Button presses sent to Pi over TCP socket
 */
 
-#include <BLEDevice.h>
-#include <BLEServer.h>
-#include <BLEUtils.h>
-#include <BLE2902.h>
+#include <WiFi.h>
+
+// ── HOTSPOT CREDENTIALS ───────────────────────────────────────────────────────
+const char* AP_SSID     = "GlassesAP";
+const char* AP_PASSWORD = "glasses123";
+const int   PORT        = 8080;
+// ─────────────────────────────────────────────────────────────────────────────
 
 // ── PIN DEFINITIONS ───────────────────────────────────────────────────────────
 #define TRIGGER  4   // ok / confirm button
@@ -21,13 +25,8 @@
 #define BUZZER    25  // buzzer
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ── BLE DEFINITIONS ───────────────────────────────────────────────────────────
-#define SERVICE_UUID        "12345678-1234-1234-1234-123456789abc"
-#define CHARACTERISTIC_UUID "abcd1234-ab12-ab12-ab12-abcdef123456"
-
-BLECharacteristic *pCharacteristic;
-bool deviceConnected = false;
-// ─────────────────────────────────────────────────────────────────────────────
+WiFiServer server(PORT);
+WiFiClient client;
 
 // ── DEBOUNCE ──────────────────────────────────────────────────────────────────
 unsigned long lastPressTime = 0;
@@ -57,37 +56,15 @@ void longBeep() {
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ── BLE CONNECTION CALLBACKS ──────────────────────────────────────────────────
-class ServerCallbacks : public BLEServerCallbacks {
-  void onConnect(BLEServer* pServer) {
-    deviceConnected = true;
-    digitalWrite(LED_RED,   LOW);
-    digitalWrite(LED_GREEN, HIGH);
-    longBeep();  // long beep on connection
-    Serial.println("Pi Connected");
-  }
-
-  void onDisconnect(BLEServer* pServer) {
-    deviceConnected = false;
-    digitalWrite(LED_GREEN, LOW);
-    digitalWrite(LED_RED,   HIGH);
-    beep(500);  // short beep on disconnection
-    Serial.println("Pi Disconnected - restarting advertising");
-    BLEDevice::startAdvertising();  // auto reconnect
-  }
-};
-// ─────────────────────────────────────────────────────────────────────────────
-
-// ── SEND SIGNAL OVER BLE ──────────────────────────────────────────────────────
+// ── SEND SIGNAL ───────────────────────────────────────────────────────────────
 void sendSignal(const char* signal) {
-  if (deviceConnected) {
-    pCharacteristic->setValue(signal);
-    pCharacteristic->notify();
+  if (client && client.connected()) {
+    client.println(signal);
     Serial.print("Sent: ");
     Serial.println(signal);
     beep(100);  // short beep on button press
   } else {
-    Serial.println("Not connected to Pi");
+    Serial.println("Pi not connected");
   }
 }
 // ─────────────────────────────────────────────────────────────────────────────
@@ -116,29 +93,37 @@ void setup() {
   longBeep();  // startup beep
   // ─────────────────────────────────────────────────────────────────────────
 
-  // ── BLE INIT ──────────────────────────────────────────────────────────────
-  BLEDevice::init("Assistive-Glasses-Remote");
-  BLEServer *pServer = BLEDevice::createServer();
-  pServer->setCallbacks(new ServerCallbacks());
+  // ── START HOTSPOT ─────────────────────────────────────────────────────────
+  Serial.println("Starting hotspot...");
+  WiFi.softAP(AP_SSID, AP_PASSWORD);
 
-  BLEService *pService = pServer->createService(SERVICE_UUID);
-  pCharacteristic = pService->createCharacteristic(
-    CHARACTERISTIC_UUID,
-    BLECharacteristic::PROPERTY_NOTIFY
-  );
-  pCharacteristic->addDescriptor(new BLE2902());
-  pService->start();
+  Serial.print("Hotspot IP: ");
+  Serial.println(WiFi.softAPIP());  // always 192.168.4.1
 
-  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
-  pAdvertising->addServiceUUID(SERVICE_UUID);
-  BLEDevice::startAdvertising();
-
-  Serial.println("BLE started - waiting for Pi...");
+  server.begin();
+  Serial.println("Server started - waiting for Pi to connect...");
   // ─────────────────────────────────────────────────────────────────────────
 }
 
 void loop() {
-  // INPUT_PULLUP - pressed = LOW
+  // ── CHECK FOR NEW CLIENT ──────────────────────────────────────────────────
+  if (!client || !client.connected()) {
+    client = server.available();
+
+    if (client) {
+      Serial.println("Pi connected!");
+      digitalWrite(LED_RED,   LOW);   // red off
+      digitalWrite(LED_GREEN, HIGH);  // green on
+      longBeep();                     // long beep on connection
+    } else {
+      // no client connected - red on green off
+      digitalWrite(LED_RED,   HIGH);
+      digitalWrite(LED_GREEN, LOW);
+    }
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // ── READ BUTTONS ──────────────────────────────────────────────────────────
   if (digitalRead(TRIGGER) == LOW && debounce()) {
     sendSignal("TRIGGER");
   }
@@ -157,6 +142,7 @@ void loop() {
   else if (digitalRead(BUTTON5) == LOW && debounce()) {
     sendSignal("BUTTON5");
   }
+  // ─────────────────────────────────────────────────────────────────────────
 
   delay(10);
 }
