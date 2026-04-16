@@ -1,9 +1,12 @@
 /*
-  ESP32 Remote - Button + LED + Buzzer Test
-  Both LEDs glow on startup
-  Long beep on startup
-  Press any button - serial monitor shows which one
+  ESP32 Remote - BLE Button Transmitter
+  Sends button press over BLE to Raspberry Pi automatically
 */
+
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
 
 // ── PIN DEFINITIONS ───────────────────────────────────────────────────────────
 #define TRIGGER  4   // ok / confirm button
@@ -13,9 +16,17 @@
 #define BUTTON4  32  // text-to-speech
 #define BUTTON5  14  // world description
 
-#define LED_RED   26  // red led
-#define LED_GREEN 27  // green led
-#define BUZZER    25  // active buzzer
+#define LED_RED   26  // red led  - not connected
+#define LED_GREEN 27  // green led - connected to pi
+#define BUZZER    25  // buzzer
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── BLE DEFINITIONS ───────────────────────────────────────────────────────────
+#define SERVICE_UUID        "12345678-1234-1234-1234-123456789abc"
+#define CHARACTERISTIC_UUID "abcd1234-ab12-ab12-ab12-abcdef123456"
+
+BLECharacteristic *pCharacteristic;
+bool deviceConnected = false;
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── DEBOUNCE ──────────────────────────────────────────────────────────────────
@@ -32,6 +43,55 @@ bool debounce() {
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ── BUZZER HELPERS ────────────────────────────────────────────────────────────
+void beep(int duration = 200) {
+  digitalWrite(BUZZER, HIGH);
+  delay(duration);
+  digitalWrite(BUZZER, LOW);
+}
+
+void longBeep() {
+  digitalWrite(BUZZER, HIGH);
+  delay(1000);
+  digitalWrite(BUZZER, LOW);
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── BLE CONNECTION CALLBACKS ──────────────────────────────────────────────────
+class ServerCallbacks : public BLEServerCallbacks {
+  void onConnect(BLEServer* pServer) {
+    deviceConnected = true;
+    digitalWrite(LED_RED,   LOW);
+    digitalWrite(LED_GREEN, HIGH);
+    longBeep();  // long beep on connection
+    Serial.println("Pi Connected");
+  }
+
+  void onDisconnect(BLEServer* pServer) {
+    deviceConnected = false;
+    digitalWrite(LED_GREEN, LOW);
+    digitalWrite(LED_RED,   HIGH);
+    beep(500);  // short beep on disconnection
+    Serial.println("Pi Disconnected - restarting advertising");
+    BLEDevice::startAdvertising();  // auto reconnect
+  }
+};
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── SEND SIGNAL OVER BLE ──────────────────────────────────────────────────────
+void sendSignal(const char* signal) {
+  if (deviceConnected) {
+    pCharacteristic->setValue(signal);
+    pCharacteristic->notify();
+    Serial.print("Sent: ");
+    Serial.println(signal);
+    beep(100);  // short beep on button press
+  } else {
+    Serial.println("Not connected to Pi");
+  }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 void setup() {
   Serial.begin(9600);
 
@@ -44,41 +104,58 @@ void setup() {
   pinMode(BUTTON5, INPUT_PULLUP);
   // ─────────────────────────────────────────────────────────────────────────
 
-  // ── LED PINS ──────────────────────────────────────────────────────────────
+  // ── LED + BUZZER PINS ─────────────────────────────────────────────────────
   pinMode(LED_RED,   OUTPUT);
   pinMode(LED_GREEN, OUTPUT);
-  digitalWrite(LED_RED,   HIGH);  // both on at startup
-  digitalWrite(LED_GREEN, HIGH);
+  pinMode(BUZZER,    OUTPUT);
+
+  digitalWrite(LED_RED,   HIGH);  // red on at startup
+  digitalWrite(LED_GREEN, LOW);
+  digitalWrite(BUZZER,    LOW);
+
+  longBeep();  // startup beep
   // ─────────────────────────────────────────────────────────────────────────
 
-  // ── BUZZER PIN ────────────────────────────────────────────────────────────
-  pinMode(BUZZER, OUTPUT);
-  digitalWrite(BUZZER, HIGH);  // long beep on startup
-  delay(1000);                 // beep for 1 second
-  digitalWrite(BUZZER, LOW);  // stop beep
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── BLE INIT ──────────────────────────────────────────────────────────────
+  BLEDevice::init("Assistive-Glasses-Remote");
+  BLEServer *pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new ServerCallbacks());
 
-  Serial.println("Ready - press any button");
+  BLEService *pService = pServer->createService(SERVICE_UUID);
+  pCharacteristic = pService->createCharacteristic(
+    CHARACTERISTIC_UUID,
+    BLECharacteristic::PROPERTY_NOTIFY
+  );
+  pCharacteristic->addDescriptor(new BLE2902());
+  pService->start();
+
+  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID);
+  BLEDevice::startAdvertising();
+
+  Serial.println("BLE started - waiting for Pi...");
+  // ─────────────────────────────────────────────────────────────────────────
 }
 
 void loop() {
+  // INPUT_PULLUP - pressed = LOW
   if (digitalRead(TRIGGER) == LOW && debounce()) {
-    Serial.println("TRIGGER pressed - ok / confirm");
+    sendSignal("TRIGGER");
   }
   else if (digitalRead(BUTTON1) == LOW && debounce()) {
-    Serial.println("BUTTON1 pressed - active path navigation");
+    sendSignal("BUTTON1");
   }
   else if (digitalRead(BUTTON2) == LOW && debounce()) {
-    Serial.println("BUTTON2 pressed - face registration and recognition");
+    sendSignal("BUTTON2");
   }
   else if (digitalRead(BUTTON3) == LOW && debounce()) {
-    Serial.println("BUTTON3 pressed - currency identification");
+    sendSignal("BUTTON3");
   }
   else if (digitalRead(BUTTON4) == LOW && debounce()) {
-    Serial.println("BUTTON4 pressed - text-to-speech");
+    sendSignal("BUTTON4");
   }
   else if (digitalRead(BUTTON5) == LOW && debounce()) {
-    Serial.println("BUTTON5 pressed - world description");
+    sendSignal("BUTTON5");
   }
 
   delay(10);
