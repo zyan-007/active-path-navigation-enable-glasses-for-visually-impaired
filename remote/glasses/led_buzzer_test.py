@@ -8,11 +8,10 @@ import socket
 import subprocess
 import RPi.GPIO as GPIO
 import time
-import threading
 
 # ── NETWORK DEFINITIONS ───────────────────────────────────────────────────────
-ESP32_IP   = "192.168.4.1"
-PORT       = 8080
+ESP32_IP = "192.168.4.1"
+PORT     = 8080
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── PIN DEFINITIONS ───────────────────────────────────────────────────────────
@@ -31,10 +30,6 @@ BUTTON_MESSAGES = {
     "BUTTON4": "Button 4 pressed. Mode 4 selected. Text to speech.",
     "BUTTON5": "Button 5 pressed. Mode 5 selected. World description.",
 }
-# ─────────────────────────────────────────────────────────────────────────────
-
-# ── STATE ─────────────────────────────────────────────────────────────────────
-is_connected = False
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── GPIO SETUP ────────────────────────────────────────────────────────────────
@@ -63,19 +58,17 @@ def long_beep():
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── LED HELPERS ───────────────────────────────────────────────────────────────
-def all_leds_off():
-    GPIO.output(LED_RED,   GPIO.LOW)
-    GPIO.output(LED_GREEN, GPIO.LOW)
-
 def set_searching():
-    global is_connected
-    if not is_connected:
-        GPIO.output(LED_RED,   GPIO.HIGH)
-        GPIO.output(LED_GREEN, GPIO.LOW)
+    GPIO.output(LED_RED,   GPIO.HIGH)
+    GPIO.output(LED_GREEN, GPIO.LOW)
 
 def set_connected():
     GPIO.output(LED_RED,   GPIO.LOW)
     GPIO.output(LED_GREEN, GPIO.HIGH)
+
+def all_leds_off():
+    GPIO.output(LED_RED,   GPIO.LOW)
+    GPIO.output(LED_GREEN, GPIO.LOW)
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── SPEAK ─────────────────────────────────────────────────────────────────────
@@ -86,7 +79,7 @@ def speak(text):
     subprocess.Popen(['espeak', '-s', '140', text])
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ── PHASE 1 - WAIT FOR CHECK BUTTON ──────────────────────────────────────────
+# ── WAIT FOR CHECK BUTTON ─────────────────────────────────────────────────────
 def wait_for_check_button():
     print("Waiting for check button press...")
     all_leds_off()
@@ -99,89 +92,120 @@ def wait_for_check_button():
         if GPIO.input(CHECK_BUTTON) == GPIO.LOW:
             time.sleep(0.05)
             if GPIO.input(CHECK_BUTTON) == GPIO.LOW:
-                print("Check button pressed - earphones confirmed")
+                print("Check button pressed")
                 long_beep()
                 time.sleep(0.3)
                 return
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ── PHASE 2 - WAIT FOR WIFI ───────────────────────────────────────────────────
+# ── WAIT FOR WIFI ─────────────────────────────────────────────────────────────
 def wait_for_wifi():
     print("Waiting for WiFi connection to ESP32 hotspot...")
-    speak("Waiting for network")
-
     while True:
         result = subprocess.run(
-            ['ping', '-c', '1', '-W', '1', ESP32_IP],
+            ['ping', '-c', '1', '-W', '2', ESP32_IP],
             capture_output=True
         )
         if result.returncode == 0:
             print("ESP32 hotspot reachable")
             return
-        else:
-            print("ESP32 not reachable yet, retrying...")
-            time.sleep(2)
+        print("ESP32 not reachable yet, retrying...")
+        time.sleep(2)
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ── PHASE 3 - CONNECT AND LISTEN ─────────────────────────────────────────────
+# ── CONNECT AND LISTEN ────────────────────────────────────────────────────────
 def connect_and_listen():
-    global is_connected
 
     while True:
-        is_connected = False
+        # ── SET SEARCHING STATE ───────────────────────────────────────────────
         set_searching()
-        speak("Searching for remote")
         print("Connecting to ESP32...")
+
+        # only speak searching once per attempt not every loop
+        spoke_searching = False
+
+        # ── WAIT FOR WIFI BEFORE ATTEMPTING CONNECTION ────────────────────────
+        wait_for_wifi()
+
+        if not spoke_searching:
+            speak("Searching for remote")
+            spoke_searching = True
+
+        sock = None
 
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(5)
             sock.connect((ESP32_IP, PORT))
-            sock.settimeout(None)  # remove timeout after connected
 
-            is_connected = True
-            set_connected()  # green on red off
+            # connected successfully
+            sock.settimeout(10)  # timeout for receiving data
+            set_connected()
             speak("Remote connected. Please select a mode.")
             print("Connected to ESP32!")
 
-            # listen for button signals
+            # ── LISTEN LOOP ───────────────────────────────────────────────────
+            buffer = ""
             while True:
-                data = sock.recv(1024)
-                if not data:
-                    print("Connection lost")
-                    break
+                try:
+                    data = sock.recv(1024)
 
-                signal = data.decode('utf-8').strip()
-                print(f"Received: {signal}")
+                    if not data:
+                        # empty data means connection closed
+                        print("Connection closed by ESP32")
+                        break
 
-                if signal in BUTTON_MESSAGES:
-                    speak(BUTTON_MESSAGES[signal])
-                else:
-                    print(f"Unknown signal: {signal}")
+                    # decode and clean the signal
+                    buffer += data.decode('utf-8')
+
+                    # process complete lines
+                    while '\n' in buffer:
+                        line, buffer = buffer.split('\n', 1)
+                        signal = line.strip()  # remove all whitespace and \r
+
+                        if signal == "":
+                            continue  # skip empty lines
+
+                        print(f"Received: '{signal}'")
+
+                        if signal in BUTTON_MESSAGES:
+                            speak(BUTTON_MESSAGES[signal])
+                        else:
+                            print(f"Unknown signal: '{signal}'")
+
+                except socket.timeout:
+                    # no data received - check if still connected
+                    try:
+                        sock.send(b'')  # send empty to check connection
+                    except:
+                        print("Connection lost - timeout")
+                        break
+
+        except ConnectionRefusedError:
+            print("ESP32 server not ready yet, retrying...")
+
+        except OSError as e:
+            print(f"Network error: {e}")
 
         except Exception as e:
             print(f"Connection error: {e}")
 
         finally:
-            is_connected = False
+            # always clean up socket and set searching state
             set_searching()
-            try:
-                sock.close()
-            except:
-                pass
-            speak("Remote disconnected. Searching again.")
+            if sock:
+                try:
+                    sock.close()
+                except:
+                    pass
+            print("Disconnected - retrying in 3 seconds...")
             time.sleep(3)
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 def main():
-    # phase 1 - wait for check button
     wait_for_check_button()
-
-    # phase 2 - wait for wifi
     wait_for_wifi()
-
-    # phase 3 - connect and listen forever
     connect_and_listen()
 
 try:
@@ -189,5 +213,6 @@ try:
 except KeyboardInterrupt:
     print("Stopped")
 finally:
+    all_leds_off()
     GPIO.cleanup()
 # ─────────────────────────────────────────────────────────────────────────────
