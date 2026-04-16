@@ -1,17 +1,18 @@
 '''
-Raspberry Pi - Classic Bluetooth RFCOMM Client
-Connects to ESP32 automatically
-Speaks which button was pressed
+Raspberry Pi - BLE Listener
+Fixed version - was working before
+Only fix: connection stability
 '''
 
-import bluetooth
+import asyncio
 import os
 import RPi.GPIO as GPIO
 import time
+from bleak import BleakScanner, BleakClient
 
-# ── BLUETOOTH ─────────────────────────────────────────────────────────────────
-DEVICE_NAME = "Assistive-Glasses-Remote"
-PORT        = 1  # RFCOMM port
+# ── BLE ───────────────────────────────────────────────────────────────────────
+DEVICE_NAME         = "Assistive-Glasses-Remote"
+CHARACTERISTIC_UUID = "abcd1234-ab12-ab12-ab12-abcdef123456"
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── PINS ──────────────────────────────────────────────────────────────────────
@@ -91,90 +92,77 @@ def phase1_wait_for_check_button():
                 return
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ── PHASE 2 - FIND ESP32 ──────────────────────────────────────────────────────
-def phase2_find_device():
-    print("Phase 2: scanning for ESP32")
-    speak("Searching for remote")
-    red_on()
-
-    while True:
-        print("Scanning...")
-        devices = bluetooth.discover_devices(duration=5, lookup_names=True)
-
-        for address, name in devices:
-            if name == DEVICE_NAME:
-                print(f"Found: {address}")
-                return address
-
-        print("Not found, retrying...")
-        time.sleep(2)
+# ── NOTIFICATION HANDLER ──────────────────────────────────────────────────────
+def on_button_press(sender, data):
+    signal = data.decode('utf-8').strip()
+    print(f"Received: '{signal}'")
+    if signal in BUTTON_MESSAGES:
+        speak(BUTTON_MESSAGES[signal])
+    else:
+        print(f"Unknown: '{signal}'")
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ── PHASE 3 - CONNECT AND LISTEN ─────────────────────────────────────────────
-def phase3_connect(address):
-    print("Phase 3: connecting")
-
+# ── PHASE 2 - SCAN AND CONNECT ────────────────────────────────────────────────
+async def phase2_connect():
     while True:
-        sock = None
+        print("Scanning for ESP32...")
+        red_on()
 
         try:
-            sock = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
-            sock.connect((address, PORT))
+            # scan until found - no timeout so it waits forever
+            device = None
+            while device is None:
+                device = await BleakScanner.find_device_by_name(
+                    DEVICE_NAME, timeout=10
+                )
+                if device is None:
+                    print("Not found, retrying...")
 
+            print(f"Found: {device.address}")
+
+            # connect
+            client = BleakClient(device.address)
+            await client.connect()
+
+            if not client.is_connected:
+                print("Failed to connect, retrying...")
+                await asyncio.sleep(2)
+                continue
+
+            # stable connection confirmed
             green_on()
             speak("Remote connected. Please select a mode.")
             print("Connected")
 
-            # ── LISTEN ────────────────────────────────────────────────────────
-            buffer = ""
+            await client.start_notify(CHARACTERISTIC_UUID, on_button_press)
+
+            # keep alive - ping every second to detect drops
             while True:
-                data = sock.recv(1024)
-
-                if not data:
-                    print("Disconnected")
+                if not client.is_connected:
+                    print("Connection dropped")
                     break
+                await asyncio.sleep(1)
 
-                buffer += data.decode('utf-8')
-
-                while '\n' in buffer:
-                    line, buffer = buffer.split('\n', 1)
-                    signal = line.strip()
-
-                    if not signal:
-                        continue
-
-                    print(f"Received: '{signal}'")
-
-                    if signal in BUTTON_MESSAGES:
-                        speak(BUTTON_MESSAGES[signal])
-                    else:
-                        print(f"Unknown: '{signal}'")
+            # disconnected
+            await client.disconnect()
 
         except Exception as e:
             print(f"Error: {e}")
 
-        finally:
-            red_on()
-            if sock:
-                try:
-                    sock.close()
-                except:
-                    pass
-
-        # reconnect
+        # disconnected - restart scan
+        red_on()
         speak("Remote disconnected. Searching.")
-        time.sleep(2)
-        address = phase2_find_device()
+        await asyncio.sleep(2)
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
-def main():
+async def main():
     phase1_wait_for_check_button()
-    address = phase2_find_device()
-    phase3_connect(address)
+    speak("Searching for remote")
+    await phase2_connect()
 
 try:
-    main()
+    asyncio.run(main())
 except KeyboardInterrupt:
     print("Stopped")
 finally:
