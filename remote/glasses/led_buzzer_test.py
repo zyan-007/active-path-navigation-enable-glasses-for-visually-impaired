@@ -1,16 +1,17 @@
 '''
-Raspberry Pi - Assistive Glasses
-WiFi TCP Client - Clean Version
+Raspberry Pi - Classic Bluetooth RFCOMM Client
+Connects to ESP32 automatically
+Speaks which button was pressed
 '''
 
-import socket
+import bluetooth
 import os
 import RPi.GPIO as GPIO
 import time
 
-# ── NETWORK ───────────────────────────────────────────────────────────────────
-ESP32_IP = "192.168.4.1"
-PORT     = 8080
+# ── BLUETOOTH ─────────────────────────────────────────────────────────────────
+DEVICE_NAME = "Assistive-Glasses-Remote"
+PORT        = 1  # RFCOMM port
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── PINS ──────────────────────────────────────────────────────────────────────
@@ -90,37 +91,39 @@ def phase1_wait_for_check_button():
                 return
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ── PHASE 2 - WAIT FOR ESP32 HOTSPOT ─────────────────────────────────────────
-def phase2_wait_for_hotspot():
-    print("Phase 2: waiting for ESP32 hotspot")
+# ── PHASE 2 - FIND ESP32 ──────────────────────────────────────────────────────
+def phase2_find_device():
+    print("Phase 2: scanning for ESP32")
+    speak("Searching for remote")
     red_on()
 
     while True:
-        result = os.system(f'ping -c 1 -W 2 {ESP32_IP} > /dev/null 2>&1')
-        if result == 0:
-            print("Hotspot found")
-            return
-        print("Hotspot not found, retrying...")
+        print("Scanning...")
+        devices = bluetooth.discover_devices(duration=5, lookup_names=True)
+
+        for address, name in devices:
+            if name == DEVICE_NAME:
+                print(f"Found: {address}")
+                return address
+
+        print("Not found, retrying...")
         time.sleep(2)
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── PHASE 3 - CONNECT AND LISTEN ─────────────────────────────────────────────
-def phase3_connect():
-    print("Phase 3: connecting to ESP32")
+def phase3_connect(address):
+    print("Phase 3: connecting")
 
     while True:
         sock = None
 
         try:
-            # ── CONNECT ───────────────────────────────────────────────────────
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(5)
-            sock.connect((ESP32_IP, PORT))
-            sock.settimeout(None)
+            sock = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
+            sock.connect((address, PORT))
 
             green_on()
             speak("Remote connected. Please select a mode.")
-            print("Connected to ESP32")
+            print("Connected")
 
             # ── LISTEN ────────────────────────────────────────────────────────
             buffer = ""
@@ -128,7 +131,7 @@ def phase3_connect():
                 data = sock.recv(1024)
 
                 if not data:
-                    print("ESP32 disconnected")
+                    print("Disconnected")
                     break
 
                 buffer += data.decode('utf-8')
@@ -158,19 +161,17 @@ def phase3_connect():
                 except:
                     pass
 
-        # ── RECONNECT ─────────────────────────────────────────────────────────
-        print("Disconnected - waiting for hotspot")
-        speak("Remote disconnected")
+        # reconnect
+        speak("Remote disconnected. Searching.")
         time.sleep(2)
-        phase2_wait_for_hotspot()
+        address = phase2_find_device()
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 def main():
     phase1_wait_for_check_button()
-    phase2_wait_for_hotspot()
-    speak("Searching for remote")
-    phase3_connect()
+    address = phase2_find_device()
+    phase3_connect(address)
 
 try:
     main()

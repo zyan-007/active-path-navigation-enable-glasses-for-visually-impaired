@@ -1,16 +1,11 @@
 /*
-  ESP32 Remote - WiFi Hotspot + TCP Server
-  ESP32 creates hotspot, Pi connects to it
-  Button presses sent to Pi over TCP socket
+  ESP32 Remote - Classic Bluetooth RFCOMM
+  Simple serial over Bluetooth to Raspberry Pi
 */
 
-#include <WiFi.h>
+#include "BluetoothSerial.h"
 
-// ── HOTSPOT CREDENTIALS ───────────────────────────────────────────────────────
-const char* AP_SSID     = "GlassesAP";
-const char* AP_PASSWORD = "glasses123";
-const int   PORT        = 8080;
-// ─────────────────────────────────────────────────────────────────────────────
+BluetoothSerial SerialBT;
 
 // ── PIN DEFINITIONS ───────────────────────────────────────────────────────────
 #define TRIGGER  4   // ok / confirm button
@@ -20,13 +15,10 @@ const int   PORT        = 8080;
 #define BUTTON4  32  // text-to-speech
 #define BUTTON5  14  // world description
 
-#define LED_RED   26  // red led  - not connected
-#define LED_GREEN 27  // green led - connected to pi
+#define LED_RED   26  // red led
+#define LED_GREEN 27  // green led
 #define BUZZER    25  // buzzer
 // ─────────────────────────────────────────────────────────────────────────────
-
-WiFiServer server(PORT);
-WiFiClient client;
 
 // ── DEBOUNCE ──────────────────────────────────────────────────────────────────
 unsigned long lastPressTime = 0;
@@ -58,11 +50,11 @@ void longBeep() {
 
 // ── SEND SIGNAL ───────────────────────────────────────────────────────────────
 void sendSignal(const char* signal) {
-  if (client && client.connected()) {
-    client.println(signal);
+  if (SerialBT.connected()) {
+    SerialBT.println(signal);
     Serial.print("Sent: ");
     Serial.println(signal);
-    beep(100);  // short beep on button press
+    beep(100);
   } else {
     Serial.println("Pi not connected");
   }
@@ -81,45 +73,32 @@ void setup() {
   pinMode(BUTTON5, INPUT_PULLUP);
   // ─────────────────────────────────────────────────────────────────────────
 
-  // ── LED + BUZZER PINS ─────────────────────────────────────────────────────
+  // ── LED + BUZZER ──────────────────────────────────────────────────────────
   pinMode(LED_RED,   OUTPUT);
   pinMode(LED_GREEN, OUTPUT);
   pinMode(BUZZER,    OUTPUT);
 
-  digitalWrite(LED_RED,   HIGH);  // red on at startup
+  digitalWrite(LED_RED,   HIGH);
   digitalWrite(LED_GREEN, LOW);
   digitalWrite(BUZZER,    LOW);
 
-  longBeep();  // startup beep
+  longBeep();
   // ─────────────────────────────────────────────────────────────────────────
 
-  // ── START HOTSPOT ─────────────────────────────────────────────────────────
-  Serial.println("Starting hotspot...");
-  WiFi.softAP(AP_SSID, AP_PASSWORD);
-
-  Serial.print("Hotspot IP: ");
-  Serial.println(WiFi.softAPIP());  // always 192.168.4.1
-
-  server.begin();
-  Serial.println("Server started - waiting for Pi to connect...");
+  // ── BLUETOOTH INIT ────────────────────────────────────────────────────────
+  SerialBT.begin("Assistive-Glasses-Remote");
+  Serial.println("Bluetooth started - waiting for Pi...");
   // ─────────────────────────────────────────────────────────────────────────
 }
 
 void loop() {
-  // ── CHECK FOR NEW CLIENT ──────────────────────────────────────────────────
-  if (!client || !client.connected()) {
-    client = server.available();
-
-    if (client) {
-      Serial.println("Pi connected!");
-      digitalWrite(LED_RED,   LOW);   // red off
-      digitalWrite(LED_GREEN, HIGH);  // green on
-      longBeep();                     // long beep on connection
-    } else {
-      // no client connected - red on green off
-      digitalWrite(LED_RED,   HIGH);
-      digitalWrite(LED_GREEN, LOW);
-    }
+  // ── UPDATE LEDS BASED ON CONNECTION ───────────────────────────────────────
+  if (SerialBT.connected()) {
+    digitalWrite(LED_RED,   LOW);
+    digitalWrite(LED_GREEN, HIGH);
+  } else {
+    digitalWrite(LED_RED,   HIGH);
+    digitalWrite(LED_GREEN, LOW);
   }
   // ─────────────────────────────────────────────────────────────────────────
 
