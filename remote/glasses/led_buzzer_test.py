@@ -1,18 +1,17 @@
 '''
-Raspberry Pi - BLE Listener
-Fixed version - was working before
-Only fix: connection stability
+Raspberry Pi - UART Serial Listener
+Reads button signals from ESP32 over wired UART
+Simple, reliable, no wireless issues
 '''
 
-import asyncio
+import serial
 import os
 import RPi.GPIO as GPIO
 import time
-from bleak import BleakScanner, BleakClient
 
-# ── BLE ───────────────────────────────────────────────────────────────────────
-DEVICE_NAME         = "Assistive-Glasses-Remote"
-CHARACTERISTIC_UUID = "abcd1234-ab12-ab12-ab12-abcdef123456"
+# ── SERIAL ────────────────────────────────────────────────────────────────────
+SERIAL_PORT = '/dev/serial0'
+BAUD_RATE   = 9600
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── PINS ──────────────────────────────────────────────────────────────────────
@@ -92,77 +91,44 @@ def phase1_wait_for_check_button():
                 return
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ── NOTIFICATION HANDLER ──────────────────────────────────────────────────────
-def on_button_press(sender, data):
-    signal = data.decode('utf-8').strip()
-    print(f"Received: '{signal}'")
-    if signal in BUTTON_MESSAGES:
-        speak(BUTTON_MESSAGES[signal])
-    else:
-        print(f"Unknown: '{signal}'")
-# ─────────────────────────────────────────────────────────────────────────────
+# ── PHASE 2 - LISTEN FOR BUTTON PRESSES ──────────────────────────────────────
+def phase2_listen():
+    print("Phase 2: opening serial port")
 
-# ── PHASE 2 - SCAN AND CONNECT ────────────────────────────────────────────────
-async def phase2_connect():
-    while True:
-        print("Scanning for ESP32...")
+    try:
+        ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
+        print(f"Serial open: {SERIAL_PORT}")
+
+        green_on()
+        speak("System ready. Please select a mode.")
+
+        while True:
+            if ser.in_waiting > 0:
+                line = ser.readline().decode('utf-8').strip()
+
+                if not line:
+                    continue
+
+                print(f"Received: '{line}'")
+
+                if line in BUTTON_MESSAGES:
+                    speak(BUTTON_MESSAGES[line])
+                else:
+                    print(f"Unknown: '{line}'")
+
+    except serial.SerialException as e:
+        print(f"Serial error: {e}")
+        print("Check wiring and that UART is enabled on Pi")
         red_on()
-
-        try:
-            # scan until found - no timeout so it waits forever
-            device = None
-            while device is None:
-                device = await BleakScanner.find_device_by_name(
-                    DEVICE_NAME, timeout=10
-                )
-                if device is None:
-                    print("Not found, retrying...")
-
-            print(f"Found: {device.address}")
-
-            # connect
-            client = BleakClient(device.address)
-            await client.connect()
-
-            if not client.is_connected:
-                print("Failed to connect, retrying...")
-                await asyncio.sleep(2)
-                continue
-
-            # stable connection confirmed
-            green_on()
-            speak("Remote connected. Please select a mode.")
-            print("Connected")
-
-            await client.start_notify(CHARACTERISTIC_UUID, on_button_press)
-
-            # keep alive - ping every second to detect drops
-            while True:
-                if not client.is_connected:
-                    print("Connection dropped")
-                    break
-                await asyncio.sleep(1)
-
-            # disconnected
-            await client.disconnect()
-
-        except Exception as e:
-            print(f"Error: {e}")
-
-        # disconnected - restart scan
-        red_on()
-        speak("Remote disconnected. Searching.")
-        await asyncio.sleep(2)
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
-async def main():
+def main():
     phase1_wait_for_check_button()
-    speak("Searching for remote")
-    await phase2_connect()
+    phase2_listen()
 
 try:
-    asyncio.run(main())
+    main()
 except KeyboardInterrupt:
     print("Stopped")
 finally:
