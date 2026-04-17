@@ -1,7 +1,6 @@
 '''
-Raspberry Pi - UART Serial Listener
-Reads button signals from ESP32 over wired UART
-Simple, reliable, no wireless issues
+Raspberry Pi - Assistive Glasses
+UART Serial Communication with ESP32
 '''
 
 import serial
@@ -9,8 +8,15 @@ import os
 import RPi.GPIO as GPIO
 import time
 
+# ── SERIAL PORT SETUP - runs before anything else ─────────────────────────────
+os.system('sudo systemctl stop getty@ttyS0.service')
+os.system('sudo systemctl stop serial-getty@ttyS0.service')
+os.system('sudo stty -F /dev/ttyS0 9600 cs8 -cstopb -parenb')
+time.sleep(1)
+# ─────────────────────────────────────────────────────────────────────────────
+
 # ── SERIAL ────────────────────────────────────────────────────────────────────
-SERIAL_PORT = '/dev/serial0'
+SERIAL_PORT = '/dev/ttyS0'
 BAUD_RATE   = 9600
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -91,41 +97,75 @@ def phase1_wait_for_check_button():
                 return
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ── PHASE 2 - LISTEN FOR BUTTON PRESSES ──────────────────────────────────────
-def phase2_listen():
+# ── PHASE 2 - OPEN SERIAL PORT ────────────────────────────────────────────────
+def phase2_open_serial():
     print("Phase 2: opening serial port")
+    speak("Connecting to remote")
 
-    try:
-        ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
-        print(f"Serial open: {SERIAL_PORT}")
+    while True:
+        try:
+            ser = serial.Serial(
+                SERIAL_PORT,
+                BAUD_RATE,
+                timeout=1,
+                bytesize=serial.EIGHTBITS,
+                parity=serial.PARITY_NONE,
+                stopbits=serial.STOPBITS_ONE
+            )
+            print("Serial port opened")
+            green_on()
+            speak("Remote connected. Please select a mode.")
+            return ser
 
-        green_on()
-        speak("System ready. Please select a mode.")
+        except Exception as e:
+            print(f"Serial error: {e}")
+            red_on()
+            time.sleep(2)
+# ─────────────────────────────────────────────────────────────────────────────
 
-        while True:
+# ── PHASE 3 - LISTEN ──────────────────────────────────────────────────────────
+def phase3_listen(ser):
+    print("Phase 3: listening")
+    buffer = ""
+
+    while True:
+        try:
             if ser.in_waiting > 0:
-                line = ser.readline().decode('utf-8').strip()
+                raw = ser.read(ser.in_waiting)
+                buffer += raw.decode('utf-8', errors='ignore')
 
-                if not line:
-                    continue
+                while '\n' in buffer:
+                    line, buffer = buffer.split('\n', 1)
+                    signal = line.strip()
 
-                print(f"Received: '{line}'")
+                    if not signal:
+                        continue
 
-                if line in BUTTON_MESSAGES:
-                    speak(BUTTON_MESSAGES[line])
-                else:
-                    print(f"Unknown: '{line}'")
+                    print(f"Received: '{signal}'")
 
-    except serial.SerialException as e:
-        print(f"Serial error: {e}")
-        print("Check wiring and that UART is enabled on Pi")
-        red_on()
+                    if signal in BUTTON_MESSAGES:
+                        speak(BUTTON_MESSAGES[signal])
+                    else:
+                        print(f"Unknown: '{signal}'")
+
+            time.sleep(0.05)
+
+        except Exception as e:
+            print(f"Error: {e}")
+            red_on()
+            speak("Connection lost. Reconnecting.")
+            ser.close()
+            time.sleep(2)
+            os.system('sudo stty -F /dev/ttyS0 9600 cs8 -cstopb -parenb')
+            time.sleep(0.5)
+            ser = phase2_open_serial()
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 def main():
     phase1_wait_for_check_button()
-    phase2_listen()
+    ser = phase2_open_serial()
+    phase3_listen(ser)
 
 try:
     main()
