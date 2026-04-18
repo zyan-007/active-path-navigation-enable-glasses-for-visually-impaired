@@ -6,7 +6,6 @@ Buttons connected directly to Pi GPIO
 import os
 import RPi.GPIO as GPIO
 import time
-import threading
 
 # ── PINS ──────────────────────────────────────────────────────────────────────
 BUTTON1   = 5
@@ -79,14 +78,6 @@ def speak(text):
     os.system(f'espeak -s 140 "{text}" &')
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ── BUTTON CALLBACK ───────────────────────────────────────────────────────────
-def button_pressed(pin):
-    if debounce(pin):
-        message = BUTTON_MESSAGES.get(pin, "Unknown button")
-        print(f"Button pressed: GPIO {pin}")
-        speak(message)
-# ─────────────────────────────────────────────────────────────────────────────
-
 # ── PHASE 1 - RED BLINK 10 SECONDS ───────────────────────────────────────────
 def phase1_blink():
     print("Phase 1: startup sequence")
@@ -104,8 +95,6 @@ def phase2_sync():
     print("Phase 2: syncing")
     red_on()
     speak("Syncing remote and setting up audio")
-
-    # wait 5 seconds
     time.sleep(5)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -114,24 +103,22 @@ def phase3_ready():
     print("Phase 3: ready")
     green_on()
     speak("Remote synced. Please select a mode.")
+    time.sleep(3)
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── PHASE 4 - LISTEN FOR BUTTONS ─────────────────────────────────────────────
 def phase4_listen():
     print("Phase 4: listening for buttons")
 
-    # setup interrupts for each button
-    for pin in [TRIGGER, BUTTON1, BUTTON2, BUTTON3, BUTTON4, BUTTON5]:
-        GPIO.add_event_detect(
-            pin,
-            GPIO.FALLING,
-            callback=button_pressed,
-            bouncetime=300
-        )
+    buttons = [TRIGGER, BUTTON1, BUTTON2, BUTTON3, BUTTON4, BUTTON5]
 
-    # keep running forever
     while True:
-        time.sleep(0.1)
+        for pin in buttons:
+            if GPIO.input(pin) == GPIO.LOW and debounce(pin):
+                message = BUTTON_MESSAGES.get(pin, "Unknown button")
+                print(f"Button pressed: GPIO {pin}")
+                speak(message)
+        time.sleep(0.05)
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
