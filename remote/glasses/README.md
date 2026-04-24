@@ -17,3 +17,6 @@ Group=audio
 
 [Install]
 WantedBy=multi-user.target
+
+currecny 
+https://universe.roboflow.com/project-mccsh/currency-detection-cgpjn
