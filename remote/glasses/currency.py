@@ -10,13 +10,14 @@ from google import genai
 from google.genai import types
 
 # ── GEMINI API ────────────────────────────────────────────────────────────────
-os.environ['GEMINI_API_KEY'] = 'KEY'
+os.environ['GEMINI_API_KEY'] = 'YOUR_KEY'
 client = genai.Client()
 # ─────────────────────────────────────────────────────────────────────────────
 
 def speak(text):
     print(f">> {text}")
-    os.system(f'espeak -s 140 "{text}" &')
+    os.system('pkill espeak 2>/dev/null')  # kill any running espeak
+    os.system(f'espeak -s 140 "{text}"')  # blocking - waits until done
 
 def ask_gemini(frame):
     _, buffer = cv2.imencode('.jpg', frame)
@@ -46,20 +47,20 @@ def ask_gemini(frame):
 
     except Exception as e:
         error = str(e).lower()
-        print(f"Error: {e}")
+        print(f"Full error: {e}")  # print full error for debugging
 
         if 'quota' in error:
-            return "A P I limit reached. Please try again later."
+            return "API limit reached. Please try again later."
         elif 'timeout' in error:
             return "Connection timed out. Please try again."
-        elif 'network' in error or 'connection' in error or 'internet' in error:
+        elif 'network' in error or 'connection' in error:
             return "No internet connection. Please check your network."
         else:
-            return "Error identifying currency. Please try again."
+            return f"Error. {str(e)[:50]}"  # speak first 50 chars of error
 
 def open_camera():
     for index in [0, 1, 2]:
-        cap = cv2.VideoCapture(index, cv2.CAP_V4L2)  # Pi uses V4L2
+        cap = cv2.VideoCapture(index, cv2.CAP_V4L2)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         if cap.isOpened():
@@ -87,5 +88,5 @@ def run_currency_mode():
     if cap:
         speak("Ready. Point camera at notes and press confirm.")
     else:
-        speak("Camera not found. Please check connection.")
+        speak("Camera not found.")
     return cap
