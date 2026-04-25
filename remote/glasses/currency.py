@@ -6,7 +6,6 @@ Raspberry Pi Version
 
 import cv2
 import os
-import subprocess
 from google import genai
 from google.genai import types
 from config import GEMINI_API_KEY
@@ -18,7 +17,7 @@ client = genai.Client()
 
 def speak(text):
     print(f">> {text}")
-    subprocess.run(['espeak', '-s', '140', text])  # blocking, no overlap
+    os.system(f'espeak -s 140 "{text}" &')
 
 def ask_gemini(frame):
     _, buffer = cv2.imencode('.jpg', frame)
@@ -51,28 +50,25 @@ def ask_gemini(frame):
     except Exception as e:
         error = str(e).lower()
         print(f"Full error: {e}")
-
         if 'quota' in error:
             return "API limit reached. Please try again later."
         elif 'timeout' in error:
             return "Connection timed out. Please try again."
         elif 'network' in error or 'connection' in error:
             return "No internet connection. Please check your network."
-        elif '403' in error or 'permission' in error or 'leaked' in error:
+        elif '403' in error or 'permission' in error:
             return "API key error. Please check your key."
         else:
             return "Error identifying currency. Please try again."
 
 def open_camera():
-    for index in [0, 1, 2]:
-        cap = cv2.VideoCapture(index, cv2.CAP_V4L2)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        if cap.isOpened():
-            print(f"Camera opened at index {index}")
-            return cap
-        cap.release()
-
+    cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    if cap.isOpened():
+        print("Camera opened")
+        return cap
+    cap.release()
     print("Camera not found")
     return None
 
@@ -82,7 +78,6 @@ def capture_and_identify(cap):
     if not ret:
         speak("Failed to capture image. Please try again.")
         return
-
     print("Frame captured")
     speak("Identifying. Please wait.")
     result = ask_gemini(frame)
@@ -95,5 +90,5 @@ def run_currency_mode():
     if cap:
         speak("Ready. Point camera at notes and press confirm.")
     else:
-        speak("Camera not found. Please check connection.")
+        speak("Camera not found.")
     return cap
