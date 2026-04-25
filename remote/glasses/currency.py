@@ -36,7 +36,7 @@ def ask_gemini(frame):
                             )
                         ),
                         types.Part(
-                            text="Look at this image and identify Indian currency notes. List each note denomination you can see and how many of each. Then give the total amount in rupees. Be concise. Format your response as: '[count] [denomination] rupee note, total [amount] rupees'. If no currency is visible say 'No currency detected'."
+                            text="Look at this image and identify Indian currency notes. List each note denomination you can see and how many of each. Then give the total amount in rupees. Be concise. Format your response as: '[count] [denomination] rupee note, total [amount] rupees'. If no currency is visible say 'No currency detected'. If the image is blurry or unclear say 'Image not clear. Please try again'."
                         )
                     ]
                 )
@@ -45,8 +45,17 @@ def ask_gemini(frame):
         return response.text.strip()
 
     except Exception as e:
+        error = str(e).lower()
         print(f"Error: {e}")
-        return "Error identifying currency. Please try again."
+
+        if 'quota' in error:
+            return "A P I limit reached. Please try again later."
+        elif 'timeout' in error:
+            return "Connection timed out. Please try again."
+        elif 'network' in error or 'connection' in error or 'internet' in error:
+            return "No internet connection. Please check your network."
+        else:
+            return "Error identifying currency. Please try again."
 
 def open_camera():
     for index in [0, 1, 2]:
@@ -64,7 +73,7 @@ def open_camera():
 def capture_and_identify(cap):
     ret, frame = cap.read()
     if not ret:
-        speak("Failed to capture image.")
+        speak("Failed to capture image. Please try again.")
         return
 
     speak("Identifying. Please wait.")
@@ -77,4 +86,6 @@ def run_currency_mode():
     cap = open_camera()
     if cap:
         speak("Ready. Point camera at notes and press confirm.")
+    else:
+        speak("Camera not found. Please check connection.")
     return cap
