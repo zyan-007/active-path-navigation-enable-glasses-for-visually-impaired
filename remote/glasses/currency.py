@@ -10,7 +10,7 @@ from google import genai
 from google.genai import types
 
 # ── GEMINI API ────────────────────────────────────────────────────────────────
-os.environ['GEMINI_API_KEY'] = 'YOUR_KEY'
+os.environ['GEMINI_API_KEY'] = 'KEY'
 client = genai.Client()
 # ─────────────────────────────────────────────────────────────────────────────
 
