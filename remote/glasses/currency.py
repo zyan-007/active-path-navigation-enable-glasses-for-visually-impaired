@@ -1,159 +1,99 @@
 '''
-Raspberry Pi - Assistive Glasses
-DEBUG VERSION - print only, no espeak
+Currency Identification - Mode 3
+Uses Gemini Vision API to identify Indian currency notes
+Raspberry Pi Version
 '''
 
+import cv2
 import os
-import RPi.GPIO as GPIO
-import time
-from currency import run_currency_mode, capture_and_identify
+import subprocess
+from google import genai
+from google.genai import types
+from config import GEMINI_API_KEY
 
-# ── GLOBAL STATE ──────────────────────────────────────────────────────────────
-cap          = None
-current_mode = None
+# ── GEMINI API ────────────────────────────────────────────────────────────────
+os.environ['GEMINI_API_KEY'] = GEMINI_API_KEY
+client = genai.Client()
 # ─────────────────────────────────────────────────────────────────────────────
-
-# ── PINS ──────────────────────────────────────────────────────────────────────
-TRIGGER = 21
-BUTTON1 = 5
-BUTTON2 = 6
-BUTTON3 = 13
-BUTTON4 = 19
-
-LED_RED   = 17
-LED_GREEN = 22
-# ─────────────────────────────────────────────────────────────────────────────
-
-# ── BUTTON MESSAGES ───────────────────────────────────────────────────────────
-BUTTON_MESSAGES = {
-    TRIGGER: "Confirm",
-    BUTTON1: "Mode 1. Active path navigation.",
-    BUTTON2: "Mode 2. Face recognition.",
-    BUTTON3: "Mode 3. Currency identification.",
-    BUTTON4: "Mode 4. Text to speech.",
-}
-# ─────────────────────────────────────────────────────────────────────────────
-
-# ── GPIO SETUP ────────────────────────────────────────────────────────────────
-GPIO.setmode(GPIO.BCM)
-GPIO.setwarnings(False)
-
-GPIO.setup(LED_RED,   GPIO.OUT)
-GPIO.setup(LED_GREEN, GPIO.OUT)
-
-GPIO.setup(TRIGGER, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-GPIO.setup(BUTTON1, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-GPIO.setup(BUTTON2, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-GPIO.setup(BUTTON3, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-GPIO.setup(BUTTON4, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-
-GPIO.output(LED_RED,   GPIO.LOW)
-GPIO.output(LED_GREEN, GPIO.LOW)
-# ─────────────────────────────────────────────────────────────────────────────
-
-# ── DEBOUNCE ──────────────────────────────────────────────────────────────────
-last_press = {}
-DEBOUNCE_MS = 300
-
-def debounce(pin):
-    now = time.time() * 1000
-    if pin not in last_press or now - last_press[pin] > DEBOUNCE_MS:
-        last_press[pin] = now
-        return True
-    return False
-# ─────────────────────────────────────────────────────────────────────────────
-
-# ── HELPERS ───────────────────────────────────────────────────────────────────
-def red_on():
-    GPIO.output(LED_RED,   GPIO.HIGH)
-    GPIO.output(LED_GREEN, GPIO.LOW)
-
-def green_on():
-    GPIO.output(LED_RED,   GPIO.LOW)
-    GPIO.output(LED_GREEN, GPIO.HIGH)
-
-def all_off():
-    GPIO.output(LED_RED,   GPIO.LOW)
-    GPIO.output(LED_GREEN, GPIO.LOW)
 
 def speak(text):
-    print(f">> {text}")  # just print, no espeak
-# ─────────────────────────────────────────────────────────────────────────────
+    print(f">> {text}")
+    subprocess.run(['espeak', '-s', '140', text])  # blocking, no overlap
 
-# ── PHASE 1 - RED BLINK 10 SECONDS ───────────────────────────────────────────
-def phase1_blink():
-    print("Phase 1: startup")
-    start = time.time()
-    while time.time() - start < 10:
-        GPIO.output(LED_RED, GPIO.HIGH)
-        time.sleep(0.5)
-        GPIO.output(LED_RED, GPIO.LOW)
-        time.sleep(0.5)
-# ─────────────────────────────────────────────────────────────────────────────
+def ask_gemini(frame):
+    _, buffer = cv2.imencode('.jpg', frame)
+    image_bytes = bytes(buffer)
 
-# ── PHASE 2 - SYNCING ─────────────────────────────────────────────────────────
-def phase2_sync():
-    print("Phase 2: syncing")
-    red_on()
-    speak("Syncing remote and setting up audio")
-    time.sleep(2)
-# ─────────────────────────────────────────────────────────────────────────────
+    try:
+        print("Sending to Gemini...")
+        response = client.models.generate_content(
+            model="gemini-3-flash-preview",
+            contents=[
+                types.Content(
+                    role="user",
+                    parts=[
+                        types.Part(
+                            inline_data=types.Blob(
+                                mime_type="image/jpeg",
+                                data=image_bytes
+                            )
+                        ),
+                        types.Part(
+                            text="Look at this image and identify Indian currency notes. List each note denomination you can see and how many of each. Then give the total amount in rupees. Be concise. Format your response as: '[count] [denomination] rupee note, total [amount] rupees'. If no currency is visible say 'No currency detected'. If the image is blurry or unclear say 'Image not clear. Please try again'."
+                        )
+                    ]
+                )
+            ]
+        )
+        print("Got response from Gemini")
+        return response.text.strip()
 
-# ── PHASE 3 - READY ───────────────────────────────────────────────────────────
-def phase3_ready():
-    print("Phase 3: ready")
-    green_on()
-    speak("Remote synced. Please select a mode.")
-    time.sleep(1)
-# ─────────────────────────────────────────────────────────────────────────────
+    except Exception as e:
+        error = str(e).lower()
+        print(f"Full error: {e}")
 
-# ── PHASE 4 - LISTEN ──────────────────────────────────────────────────────────
-def phase4_listen():
-    global cap, current_mode
-    print("Phase 4: listening")
-    buttons = [TRIGGER, BUTTON1, BUTTON2, BUTTON3, BUTTON4]
+        if 'quota' in error:
+            return "API limit reached. Please try again later."
+        elif 'timeout' in error:
+            return "Connection timed out. Please try again."
+        elif 'network' in error or 'connection' in error:
+            return "No internet connection. Please check your network."
+        elif '403' in error or 'permission' in error or 'leaked' in error:
+            return "API key error. Please check your key."
+        else:
+            return "Error identifying currency. Please try again."
 
-    while True:
-        for pin in buttons:
-            if GPIO.input(pin) == GPIO.LOW and debounce(pin):
-                print(f"Button pressed: GPIO {pin}")
-
-                if pin == BUTTON3:
-                    if cap:
-                        cap.release()
-                    current_mode = "currency"
-                    cap = run_currency_mode()
-
-                elif pin == TRIGGER:
-                    if current_mode == "currency" and cap:
-                        capture_and_identify(cap)
-                    else:
-                        speak(BUTTON_MESSAGES[TRIGGER])
-
-                else:
-                    if cap:
-                        cap.release()
-                        cap = None
-                    current_mode = None
-                    message = BUTTON_MESSAGES.get(pin, "Unknown")
-                    speak(message)
-
-        time.sleep(0.05)
-# ─────────────────────────────────────────────────────────────────────────────
-
-# ── MAIN ──────────────────────────────────────────────────────────────────────
-def main():
-    phase1_blink()
-    phase2_sync()
-    phase3_ready()
-    phase4_listen()
-
-try:
-    main()
-except KeyboardInterrupt:
-    print("Stopped")
-finally:
-    if cap:
+def open_camera():
+    for index in [0, 1, 2]:
+        cap = cv2.VideoCapture(index, cv2.CAP_V4L2)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        if cap.isOpened():
+            print(f"Camera opened at index {index}")
+            return cap
         cap.release()
-    all_off()
-    GPIO.cleanup()
+
+    print("Camera not found")
+    return None
+
+def capture_and_identify(cap):
+    print("Capturing frame...")
+    ret, frame = cap.read()
+    if not ret:
+        speak("Failed to capture image. Please try again.")
+        return
+
+    print("Frame captured")
+    speak("Identifying. Please wait.")
+    result = ask_gemini(frame)
+    print(f"Gemini says: {result}")
+    speak(result)
+
+def run_currency_mode():
+    speak("Mode 3 selected. Currency identification.")
+    cap = open_camera()
+    if cap:
+        speak("Ready. Point camera at notes and press confirm.")
+    else:
+        speak("Camera not found. Please check connection.")
+    return cap
