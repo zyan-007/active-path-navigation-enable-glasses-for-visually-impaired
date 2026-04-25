@@ -6,6 +6,12 @@ Raspberry Pi - Assistive Glasses
 import os
 import RPi.GPIO as GPIO
 import time
+from currency import run_currency_mode, capture_and_identify
+
+# ── GLOBAL STATE ──────────────────────────────────────────────────────────────
+cap          = None
+current_mode = None
+# ─────────────────────────────────────────────────────────────────────────────
 
 # ── PINS ──────────────────────────────────────────────────────────────────────
 TRIGGER = 21
@@ -104,15 +110,35 @@ def phase3_ready():
 
 # ── PHASE 4 - LISTEN ──────────────────────────────────────────────────────────
 def phase4_listen():
+    global cap, current_mode
     print("Phase 4: listening")
     buttons = [TRIGGER, BUTTON1, BUTTON2, BUTTON3, BUTTON4]
 
     while True:
         for pin in buttons:
             if GPIO.input(pin) == GPIO.LOW and debounce(pin):
-                message = BUTTON_MESSAGES.get(pin, "Unknown")
-                print(f"Button pressed: GPIO {pin}")
-                speak(message)
+
+                if pin == BUTTON3:
+                    if cap:
+                        cap.release()
+                    current_mode = "currency"
+                    cap = run_currency_mode()
+
+                elif pin == TRIGGER:
+                    if current_mode == "currency" and cap:
+                        capture_and_identify(cap)
+                    else:
+                        speak(BUTTON_MESSAGES[TRIGGER])
+
+                else:
+                    if cap:
+                        cap.release()
+                        cap = None
+                    current_mode = None
+                    message = BUTTON_MESSAGES.get(pin, "Unknown")
+                    print(f"Button pressed: GPIO {pin}")
+                    speak(message)
+
         time.sleep(0.05)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -128,5 +154,8 @@ try:
 except KeyboardInterrupt:
     print("Stopped")
 finally:
+    if cap:
+        cap.release()
     all_off()
     GPIO.cleanup()
+# ─────────────────────────────────────────────────────────────────────────────
