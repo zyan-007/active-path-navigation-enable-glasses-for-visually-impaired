@@ -5,8 +5,8 @@ Raspberry Pi - Assistive Glasses
 
 import os
 import threading
-import RPi.GPIO as GPIO
 import time
+import RPi.GPIO as GPIO
 from currency import run_currency_mode, capture_and_identify
 
 # ── GLOBAL STATE ──────────────────────────────────────────────────────────────
@@ -79,7 +79,9 @@ def all_off():
 
 def speak(text):
     print(f">> {text}")
-    os.system(f'espeak -s 140 "{text}"')  # blocking
+    threading.Thread(target=lambda: os.system(f'espeak -s 140 "{text}"'), daemon=True).start()
+    words = len(text.split())
+    time.sleep(max(1, words * 0.4))
 
 def speak_async(text):
     print(f">> {text}")
@@ -129,15 +131,13 @@ def phase4_listen():
                         cap.release()
                         cap = None
                     current_mode = "currency"
-                    # run in thread so button loop keeps running
-                    threading.Thread(
-                        target=lambda: globals().update({'cap': run_currency_mode()}),
-                        daemon=True
-                    ).start()
+                    def start_currency():
+                        global cap
+                        cap = run_currency_mode()
+                    threading.Thread(target=start_currency, daemon=True).start()
 
                 elif pin == TRIGGER:
                     if current_mode == "currency" and cap:
-                        # run in thread so button loop keeps running
                         threading.Thread(
                             target=lambda: capture_and_identify(cap),
                             daemon=True

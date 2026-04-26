@@ -19,11 +19,9 @@ client = genai.Client()
 
 def speak(text):
     print(f">> {text}")
-    os.system(f'espeak -s 140 "{text}"')  # blocking - waits until done
-
-def speak_async(text):
-    print(f">> {text}")
     threading.Thread(target=lambda: os.system(f'espeak -s 140 "{text}"'), daemon=True).start()
+    words = len(text.split())
+    time.sleep(max(1, words * 0.4))
 
 def ask_gemini(frame):
     _, buffer = cv2.imencode('.jpg', frame)
@@ -80,7 +78,6 @@ def open_camera():
 
 def capture_and_identify(cap):
     print("Capturing frame...")
-    # read multiple frames to get latest frame not buffered one
     for _ in range(5):
         ret, frame = cap.read()
     if not ret:
@@ -93,10 +90,10 @@ def capture_and_identify(cap):
     speak(result)
 
 def run_currency_mode():
-    speak("Mode 3 selected. Currency identification.")  # blocking - speaks first
+    speak("Mode 3 selected. Currency identification.")
     cap = open_camera()
     if cap:
-        speak("Ready. Point camera at notes and press confirm.")  # speaks after
+        speak("Ready. Point camera at notes and press confirm.")
     else:
         speak("Camera not found.")
     return cap
