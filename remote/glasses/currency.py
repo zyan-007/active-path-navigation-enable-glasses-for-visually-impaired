@@ -7,6 +7,7 @@ Raspberry Pi Version
 import cv2
 import os
 import threading
+import time
 from google import genai
 from google.genai import types
 from config import GEMINI_API_KEY
@@ -17,6 +18,10 @@ client = genai.Client()
 # ─────────────────────────────────────────────────────────────────────────────
 
 def speak(text):
+    print(f">> {text}")
+    os.system(f'espeak -s 140 "{text}"')  # blocking - waits until done
+
+def speak_async(text):
     print(f">> {text}")
     threading.Thread(target=lambda: os.system(f'espeak -s 140 "{text}"'), daemon=True).start()
 
@@ -75,7 +80,9 @@ def open_camera():
 
 def capture_and_identify(cap):
     print("Capturing frame...")
-    ret, frame = cap.read()
+    # read multiple frames to get latest frame not buffered one
+    for _ in range(5):
+        ret, frame = cap.read()
     if not ret:
         speak("Failed to capture image. Please try again.")
         return
@@ -86,10 +93,10 @@ def capture_and_identify(cap):
     speak(result)
 
 def run_currency_mode():
-    speak("Mode 3 selected. Currency identification.")
+    speak("Mode 3 selected. Currency identification.")  # blocking - speaks first
     cap = open_camera()
     if cap:
-        speak("Ready. Point camera at notes and press confirm.")
+        speak("Ready. Point camera at notes and press confirm.")  # speaks after
     else:
         speak("Camera not found.")
     return cap

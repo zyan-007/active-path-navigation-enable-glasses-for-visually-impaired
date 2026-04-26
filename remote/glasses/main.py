@@ -79,6 +79,10 @@ def all_off():
 
 def speak(text):
     print(f">> {text}")
+    os.system(f'espeak -s 140 "{text}"')  # blocking
+
+def speak_async(text):
+    print(f">> {text}")
     threading.Thread(target=lambda: os.system(f'espeak -s 140 "{text}"'), daemon=True).start()
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -98,7 +102,7 @@ def phase2_sync():
     print("Phase 2: syncing")
     red_on()
     speak("Syncing remote and setting up audio")
-    time.sleep(5)
+    time.sleep(2)
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── PHASE 3 - READY ───────────────────────────────────────────────────────────
@@ -106,7 +110,7 @@ def phase3_ready():
     print("Phase 3: ready")
     green_on()
     speak("Remote synced. Please select a mode.")
-    time.sleep(3)
+    time.sleep(1)
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── PHASE 4 - LISTEN ──────────────────────────────────────────────────────────
@@ -125,13 +129,21 @@ def phase4_listen():
                         cap.release()
                         cap = None
                     current_mode = "currency"
-                    cap = run_currency_mode()
+                    # run in thread so button loop keeps running
+                    threading.Thread(
+                        target=lambda: globals().update({'cap': run_currency_mode()}),
+                        daemon=True
+                    ).start()
 
                 elif pin == TRIGGER:
                     if current_mode == "currency" and cap:
-                        capture_and_identify(cap)
+                        # run in thread so button loop keeps running
+                        threading.Thread(
+                            target=lambda: capture_and_identify(cap),
+                            daemon=True
+                        ).start()
                     else:
-                        speak(BUTTON_MESSAGES[TRIGGER])
+                        speak_async(BUTTON_MESSAGES[TRIGGER])
 
                 else:
                     if cap:
@@ -139,7 +151,7 @@ def phase4_listen():
                         cap = None
                     current_mode = None
                     message = BUTTON_MESSAGES.get(pin, "Unknown")
-                    speak(message)
+                    speak_async(message)
 
         time.sleep(0.05)
 # ─────────────────────────────────────────────────────────────────────────────
