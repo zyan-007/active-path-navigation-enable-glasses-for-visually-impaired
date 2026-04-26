@@ -6,6 +6,7 @@ Press Q to quit
 
 import cv2
 import os
+import threading
 from google import genai
 from google.genai import types
 
@@ -16,7 +17,7 @@ client = genai.Client()
 
 def speak(text):
     print(f">> {text}")
-    os.system(f'espeak -s 140 "{text}"')  # blocking - waits until done
+    threading.Thread(target=lambda: os.system(f'espeak -s 140 "{text}"'), daemon=True).start()
 
 def ask_gemini(frame):
     _, buffer = cv2.imencode('.jpg', frame)
