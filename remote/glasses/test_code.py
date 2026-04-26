@@ -1,18 +1,40 @@
 '''
 Currency Test - Raspberry Pi
-Press SPACE to identify currency
-Press Q to quit
+Press TRIGGER button to identify currency
+Press Ctrl+C to quit
 '''
 
 import cv2
 import os
 import threading
+import RPi.GPIO as GPIO
+import time
 from google import genai
 from google.genai import types
 
 # ── GEMINI API ────────────────────────────────────────────────────────────────
 os.environ['GEMINI_API_KEY'] = 'YOUR_KEY'
 client = genai.Client()
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── GPIO ──────────────────────────────────────────────────────────────────────
+TRIGGER = 21
+GPIO.setmode(GPIO.BCM)
+GPIO.setwarnings(False)
+GPIO.setup(TRIGGER, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── DEBOUNCE ──────────────────────────────────────────────────────────────────
+last_press = 0
+DEBOUNCE_MS = 300
+
+def debounce():
+    global last_press
+    now = time.time() * 1000
+    if now - last_press > DEBOUNCE_MS:
+        last_press = now
+        return True
+    return False
 # ─────────────────────────────────────────────────────────────────────────────
 
 def speak(text):
@@ -69,31 +91,33 @@ cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 if not cap.isOpened():
     print("Camera not found")
     speak("Camera not found")
+    GPIO.cleanup()
     exit()
 
-print("Camera ready. Press SPACE to identify. Q to quit.")
+print("Camera ready. Press TRIGGER to identify.")
 speak("Camera ready. Press confirm to identify currency.")
 
-while True:
-    ret, frame = cap.read()
-    if not ret:
-        print("Failed to grab frame")
-        break
+try:
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            print("Failed to grab frame")
+            break
 
-    cv2.imshow("Currency Test - SPACE to capture, Q to quit", frame)
+        cv2.imshow("Currency Test", frame)
+        cv2.waitKey(1)
 
-    key = cv2.waitKey(1)
+        if GPIO.input(TRIGGER) == GPIO.LOW and debounce():
+            print("Trigger pressed")
+            speak("Identifying. Please wait.")
+            result = ask_gemini(frame)
+            print(f"Result: {result}")
+            speak(result)
 
-    if key == ord(' '):
-        print("Capturing...")
-        speak("Identifying. Please wait.")
-        result = ask_gemini(frame)
-        print(f"Result: {result}")
-        speak(result)
+except KeyboardInterrupt:
+    print("Stopped")
 
-    elif key == ord('q'):
-        break
-
-cap.release()
-cv2.destroyAllWindows()
-print("Done")
+finally:
+    cap.release()
+    cv2.destroyAllWindows()
+    GPIO.cleanup()
