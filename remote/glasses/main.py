@@ -8,6 +8,7 @@ import threading
 import time
 import RPi.GPIO as GPIO
 from currency import run_currency_mode, capture_and_identify
+from tts import run_tts_mode, capture_and_read
 
 # ── GLOBAL STATE ──────────────────────────────────────────────────────────────
 cap          = None
@@ -136,10 +137,25 @@ def phase4_listen():
                         cap = run_currency_mode()
                     threading.Thread(target=start_currency, daemon=True).start()
 
+                elif pin == BUTTON4:
+                    if cap:
+                        cap.release()
+                        cap = None
+                    current_mode = "tts"
+                    def start_tts():
+                        global cap
+                        cap = run_tts_mode()
+                    threading.Thread(target=start_tts, daemon=True).start()
+
                 elif pin == TRIGGER:
                     if current_mode == "currency" and cap:
                         threading.Thread(
                             target=lambda: capture_and_identify(cap),
+                            daemon=True
+                        ).start()
+                    elif current_mode == "tts" and cap:
+                        threading.Thread(
+                            target=lambda: capture_and_read(cap),
                             daemon=True
                         ).start()
                     else:
