@@ -9,10 +9,12 @@ import time
 import RPi.GPIO as GPIO
 from currency import run_currency_mode, capture_and_identify
 from tts import run_tts_mode, capture_and_read
+from face_recognition_mode import run_face_mode, register_face, recognize_face
 
 # ── GLOBAL STATE ──────────────────────────────────────────────────────────────
 cap          = None
 current_mode = None
+face_mode    = 'register'
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── PINS ──────────────────────────────────────────────────────────────────────
@@ -118,7 +120,7 @@ def phase3_ready():
 
 # ── PHASE 4 - LISTEN ──────────────────────────────────────────────────────────
 def phase4_listen():
-    global cap, current_mode
+    global cap, current_mode, face_mode
     print("Phase 4: listening")
     buttons = [TRIGGER, BUTTON1, BUTTON2, BUTTON3, BUTTON4]
 
@@ -127,7 +129,21 @@ def phase4_listen():
             if GPIO.input(pin) == GPIO.LOW and debounce(pin):
                 print(f"Button pressed: GPIO {pin}")
 
-                if pin == BUTTON3:
+                if pin == BUTTON2:
+                    if cap:
+                        cap.release()
+                        cap = None
+                    if current_mode != 'face':
+                        current_mode = 'face'
+                        face_mode = 'register'
+                    else:
+                        face_mode = 'recognize'
+                    def start_face():
+                        global cap
+                        cap = run_face_mode(face_mode)
+                    threading.Thread(target=start_face, daemon=True).start()
+
+                elif pin == BUTTON3:
                     if cap:
                         cap.release()
                         cap = None
@@ -158,6 +174,17 @@ def phase4_listen():
                             target=lambda: capture_and_read(cap),
                             daemon=True
                         ).start()
+                    elif current_mode == "face" and cap:
+                        if face_mode == 'register':
+                            threading.Thread(
+                                target=lambda: register_face(cap),
+                                daemon=True
+                            ).start()
+                        else:
+                            threading.Thread(
+                                target=lambda: recognize_face(cap),
+                                daemon=True
+                            ).start()
                     else:
                         speak_async(BUTTON_MESSAGES[TRIGGER])
 
@@ -185,6 +212,6 @@ except KeyboardInterrupt:
     print("Stopped")
 finally:
     if cap:
-        cap.release()
+        cap.relative()
     all_off()
     GPIO.cleanup()
