@@ -6,6 +6,7 @@ Raspberry Pi Version
 
 import cv2
 import os
+import threading
 from google import genai
 from google.genai import types
 from config import GEMINI_API_KEY
@@ -17,7 +18,7 @@ client = genai.Client()
 
 def speak(text):
     print(f">> {text}")
-    os.system(f'espeak -s 140 "{text}" &')
+    threading.Thread(target=lambda: os.system(f'espeak -s 140 "{text}"'), daemon=True).start()
 
 def ask_gemini(frame):
     _, buffer = cv2.imencode('.jpg', frame)
@@ -26,7 +27,7 @@ def ask_gemini(frame):
     try:
         print("Sending to Gemini...")
         response = client.models.generate_content(
-            model="gemini-3-flash-preview",
+            model="gemini-3.1-flash-lite-preview",
             contents=[
                 types.Content(
                     role="user",
@@ -44,22 +45,22 @@ def ask_gemini(frame):
                 )
             ]
         )
-        print("Got response from Gemini")
+        print("Got response")
         return response.text.strip()
 
     except Exception as e:
         error = str(e).lower()
         print(f"Full error: {e}")
-        if 'quota' in error:
+        if '429' in str(e) or 'quota' in error or 'exhausted' in error:
             return "API limit reached. Please try again later."
+        elif '403' in str(e) or 'permission' in error or 'leaked' in error:
+            return "API key error. Please check your key."
         elif 'timeout' in error:
             return "Connection timed out. Please try again."
         elif 'network' in error or 'connection' in error:
             return "No internet connection. Please check your network."
-        elif '403' in error or 'permission' in error:
-            return "API key error. Please check your key."
         else:
-            return "Error identifying currency. Please try again."
+            return "Error. Please try again."
 
 def open_camera():
     cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
