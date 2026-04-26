@@ -1,7 +1,7 @@
 '''
 Active Path Navigation - Mode 1
-Uses MobileNet SSD with OpenCV for obstacle detection
-Works on Python 3.13, no PyTorch needed
+Press TRIGGER to scan once and get directions
+Uses clock positions for obstacle location
 Raspberry Pi Version
 '''
 
@@ -24,39 +24,14 @@ CLASSES = [
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── STATE ─────────────────────────────────────────────────────────────────────
-running         = False
-last_message    = ''
-last_spoke_time = 0
-is_speaking     = False
-REPEAT_EVERY    = 4
-MIN_GAP         = 3
+net     = None
+is_busy = False
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── SPEAK ─────────────────────────────────────────────────────────────────────
-def speak_navigation(text):
-    global is_speaking, last_spoke_time, last_message
-    now = time.time()
-
-    if is_speaking:
-        return
-
-    if text == last_message and (now - last_spoke_time) < REPEAT_EVERY:
-        return
-
-    if (now - last_spoke_time) < MIN_GAP:
-        return
-
-    is_speaking     = True
-    last_message    = text
-    last_spoke_time = now
+def speak(text):
     print(f">> {text}")
-
-    def _speak():
-        global is_speaking
-        os.system(f'espeak -s 140 "{text}"')
-        is_speaking = False
-
-    threading.Thread(target=_speak, daemon=True).start()
+    os.system(f'espeak -s 140 "{text}"')
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── OPEN CAMERA ───────────────────────────────────────────────────────────────
@@ -71,59 +46,112 @@ def open_camera():
     return None
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ── ZONE LOGIC ────────────────────────────────────────────────────────────────
-def get_zone(center_x, frame_width):
-    if center_x < frame_width // 3:
-        return 'left'
-    elif center_x > (frame_width * 2) // 3:
-        return 'right'
+# ── CLOCK POSITION ────────────────────────────────────────────────────────────
+def get_clock_position(center_x, frame_width):
+    # map x position to clock: 9, 10, 11, 12, 1, 2, 3
+    ratio = center_x / frame_width
+    if ratio < 0.14:
+        return "9 o clock"
+    elif ratio < 0.28:
+        return "10 o clock"
+    elif ratio < 0.42:
+        return "11 o clock"
+    elif ratio < 0.58:
+        return "12 o clock"
+    elif ratio < 0.72:
+        return "1 o clock"
+    elif ratio < 0.86:
+        return "2 o clock"
     else:
-        return 'center'
+        return "3 o clock"
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── BOX SIZE TO STEPS ─────────────────────────────────────────────────────────
+def get_steps(box_width, frame_width):
+    # estimate distance based on box size
+    ratio = box_width / frame_width
+    if ratio > 0.5:
+        return 0  # very close, stop
+    elif ratio > 0.3:
+        return 2
+    elif ratio > 0.15:
+        return 4
+    else:
+        return 6
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── BUILD INSTRUCTION ─────────────────────────────────────────────────────────
 def build_instruction(detections):
     if not detections:
-        return "Path clear."
+        return "Path clear. You can walk forward."
 
     left   = [d for d in detections if d['zone'] == 'left']
     center = [d for d in detections if d['zone'] == 'center']
     right  = [d for d in detections if d['zone'] == 'right']
 
     if center and left and right:
-        return "Stop. Obstacles on all sides."
-    elif center and left:
-        return "Obstacle ahead and on the left. Move right."
-    elif center and right:
-        return "Obstacle ahead and on the right. Move left."
-    elif center:
-        return "Obstacle ahead. Stop."
-    elif left and right:
-        return "Obstacles on both sides. Move carefully."
-    elif left:
-        return "Obstacle on the left. Move right."
-    elif right:
-        return "Obstacle on the right. Move left."
+        return "Stop. Obstacles on all sides. Do not move."
 
-    return "Path clear."
+    elif center and left:
+        steps = center[0]['steps']
+        clock = center[0]['clock']
+        if steps == 0:
+            return f"Stop. Obstacle very close at {clock}. Move right."
+        return f"Obstacle at {clock}. Move {steps} steps right."
+
+    elif center and right:
+        steps = center[0]['steps']
+        clock = center[0]['clock']
+        if steps == 0:
+            return f"Stop. Obstacle very close at {clock}. Move left."
+        return f"Obstacle at {clock}. Move {steps} steps left."
+
+    elif center:
+        steps = center[0]['steps']
+        clock = center[0]['clock']
+        if steps == 0:
+            return f"Stop. Obstacle very close at {clock}."
+        return f"Obstacle at {clock}. Move {steps} steps to avoid."
+
+    elif left and right:
+        return "Obstacles on both sides. Move carefully forward."
+
+    elif left:
+        clock = left[0]['clock']
+        return f"Obstacle at {clock}. Move right to avoid."
+
+    elif right:
+        clock = right[0]['clock']
+        return f"Obstacle at {clock}. Move left to avoid."
+
+    return "Path clear. You can walk forward."
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ── DETECTION LOOP ────────────────────────────────────────────────────────────
-def detection_loop(cap):
-    global running, is_speaking, last_message, last_spoke_time
+# ── SCAN ONCE ─────────────────────────────────────────────────────────────────
+def scan_once(cap):
+    global net, is_busy
 
-    print("Loading model...")
-    net = cv2.dnn.readNetFromCaffe(PROTOTXT, CAFFEMODEL)
-    print("Model loaded")
-    speak_navigation("Navigation active. Scanning for obstacles.")
+    if is_busy:
+        return
 
-    while running:
-        ret, frame = cap.read()
+    is_busy = True
+
+    def _scan():
+        global is_busy
+
+        # flush buffer
+        for _ in range(5):
+            ret, frame = cap.read()
+
         if not ret:
-            break
+            speak("Failed to capture.")
+            is_busy = False
+            return
 
         frame_width  = frame.shape[1]
         frame_height = frame.shape[0]
+
+        speak("Scanning.")
 
         blob = cv2.dnn.blobFromImage(
             cv2.resize(frame, (300, 300)),
@@ -150,47 +178,65 @@ def detection_loop(cap):
 
             box     = detections_raw[0, 0, i, 3:7] * np.array([frame_width, frame_height, frame_width, frame_height])
             x1, y1, x2, y2 = box.astype(int)
-            center_x = (x1 + x2) // 2
-            center_y = (y1 + y2) // 2
+            center_x  = (x1 + x2) // 2
+            center_y  = (y1 + y2) // 2
+            box_width = x2 - x1
 
             # ignore top 20% of frame
             if center_y < frame_height * 0.2:
                 continue
 
-            zone = get_zone(center_x, frame_width)
-            detections.append({'zone': zone})
+            zone  = get_zone(center_x, frame_width)
+            clock = get_clock_position(center_x, frame_width)
+            steps = get_steps(box_width, frame_width)
 
-            print(f"Obstacle detected | Zone: {zone} | Confidence: {confidence:.0%}")
+            detections.append({
+                'zone':       zone,
+                'clock':      clock,
+                'steps':      steps,
+                'confidence': confidence,
+            })
+
+            print(f"Obstacle | Zone: {zone} | Clock: {clock} | Steps: {steps} | Confidence: {confidence:.0%}")
 
         instruction = build_instruction(detections)
-        speak_navigation(instruction)
+        speak(instruction)
+        is_busy = False
 
-        time.sleep(0.3)
+    threading.Thread(target=_scan, daemon=True).start()
+# ─────────────────────────────────────────────────────────────────────────────
 
-    print("Detection loop stopped")
+# ── ZONE LOGIC ────────────────────────────────────────────────────────────────
+def get_zone(center_x, frame_width):
+    if center_x < frame_width // 3:
+        return 'left'
+    elif center_x > (frame_width * 2) // 3:
+        return 'right'
+    else:
+        return 'center'
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── RUN MODE ──────────────────────────────────────────────────────────────────
 def run_navigation_mode():
-    global running, is_speaking, last_message, last_spoke_time
-    running         = True
-    is_speaking     = False
-    last_message    = ''
-    last_spoke_time = 0
+    global net, is_busy
+    is_busy = False
 
+    speak("Mode 1. Active path navigation.")
     cap = open_camera()
     if not cap:
-        os.system('espeak -s 140 "Camera not found."')
-        running = False
+        speak("Camera not found.")
         return None
 
-    threading.Thread(target=lambda: detection_loop(cap), daemon=True).start()
+    print("Loading model...")
+    net = cv2.dnn.readNetFromCaffe(PROTOTXT, CAFFEMODEL)
+    print("Model loaded")
+
+    speak("Ready. Press confirm to scan.")
     return cap
 
 def stop_navigation(cap):
-    global running, is_speaking
-    running     = False
-    is_speaking = False
+    global is_busy
+    is_busy = False
     if cap:
         cap.release()
 # ─────────────────────────────────────────────────────────────────────────────
