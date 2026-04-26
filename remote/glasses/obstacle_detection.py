@@ -12,56 +12,51 @@ import time
 import numpy as np
 
 # ── MODEL ─────────────────────────────────────────────────────────────────────
-PROTOTXT  = 'MobileNetSSD_deploy.prototxt'
+PROTOTXT   = 'MobileNetSSD_deploy.prototxt'
 CAFFEMODEL = 'MobileNetSSD_deploy.caffemodel'
 
-# MobileNet SSD classes
 CLASSES = [
     'background', 'aeroplane', 'bicycle', 'bird', 'boat',
     'bottle', 'bus', 'car', 'cat', 'chair',
     'cow', 'diningtable', 'dog', 'horse', 'motorbike',
     'person', 'pottedplant', 'sheep', 'sofa', 'train', 'tvmonitor'
 ]
-
-# friendly names for speaking
-FRIENDLY_NAMES = {
-    'person':      'Person',
-    'chair':       'Chair',
-    'diningtable': 'Table',
-    'bottle':      'Bottle',
-    'bicycle':     'Bicycle',
-    'motorbike':   'Motorcycle',
-    'car':         'Car',
-    'bus':         'Bus',
-    'sofa':        'Sofa',
-    'tvmonitor':   'Screen',
-    'pottedplant': 'Plant',
-    'boat':        'Boat',
-    'train':       'Train',
-}
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── STATE ─────────────────────────────────────────────────────────────────────
-running       = False
-last_message  = ''
-last_spoke    = 0
-REPEAT_EVERY  = 3  # repeat same warning every 3 seconds
+running         = False
+last_message    = ''
+last_spoke_time = 0
+is_speaking     = False
+REPEAT_EVERY    = 4
+MIN_GAP         = 3
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── SPEAK ─────────────────────────────────────────────────────────────────────
-def speak(text):
-    print(f">> {text}")
-    threading.Thread(target=lambda: os.system(f'espeak -s 140 "{text}"'), daemon=True).start()
-# ─────────────────────────────────────────────────────────────────────────────
-
-# ── SMART SPEAK - only speaks when situation changes or every 3 seconds ───────
-def smart_speak(message):
-    global last_message, last_spoke
+def speak_navigation(text):
+    global is_speaking, last_spoke_time, last_message
     now = time.time()
-    if message != last_message or (now - last_spoke) > REPEAT_EVERY:
-        speak(message)
-        last_message = message
-        last_spoke   = now
+
+    if is_speaking:
+        return
+
+    if text == last_message and (now - last_spoke_time) < REPEAT_EVERY:
+        return
+
+    if (now - last_spoke_time) < MIN_GAP:
+        return
+
+    is_speaking     = True
+    last_message    = text
+    last_spoke_time = now
+    print(f">> {text}")
+
+    def _speak():
+        global is_speaking
+        os.system(f'espeak -s 140 "{text}"')
+        is_speaking = False
+
+    threading.Thread(target=_speak, daemon=True).start()
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── OPEN CAMERA ───────────────────────────────────────────────────────────────
@@ -95,43 +90,32 @@ def build_instruction(detections):
     center = [d for d in detections if d['zone'] == 'center']
     right  = [d for d in detections if d['zone'] == 'right']
 
-    # get most prominent object name in each zone
-    def zone_name(zone_list):
-        if not zone_list:
-            return None
-        return zone_list[0]['name']
-
     if center and left and right:
-        return f"Stop. Obstacles on all sides."
+        return "Stop. Obstacles on all sides."
     elif center and left:
-        name = zone_name(center)
-        return f"{name} ahead. Move right."
+        return "Obstacle ahead and on the left. Move right."
     elif center and right:
-        name = zone_name(center)
-        return f"{name} ahead. Move left."
+        return "Obstacle ahead and on the right. Move left."
     elif center:
-        name = zone_name(center)
-        return f"{name} ahead. Stop."
+        return "Obstacle ahead. Stop."
     elif left and right:
         return "Obstacles on both sides. Move carefully."
     elif left:
-        name = zone_name(left)
-        return f"{name} on the left. Move right."
+        return "Obstacle on the left. Move right."
     elif right:
-        name = zone_name(right)
-        return f"{name} on the right. Move left."
+        return "Obstacle on the right. Move left."
 
     return "Path clear."
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── DETECTION LOOP ────────────────────────────────────────────────────────────
 def detection_loop(cap):
-    global running
+    global running, is_speaking, last_message, last_spoke_time
 
     print("Loading model...")
     net = cv2.dnn.readNetFromCaffe(PROTOTXT, CAFFEMODEL)
     print("Model loaded")
-    speak("Navigation active. Scanning for obstacles.")
+    speak_navigation("Navigation active. Scanning for obstacles.")
 
     while running:
         ret, frame = cap.read()
@@ -141,7 +125,6 @@ def detection_loop(cap):
         frame_width  = frame.shape[1]
         frame_height = frame.shape[0]
 
-        # prepare frame for model
         blob = cv2.dnn.blobFromImage(
             cv2.resize(frame, (300, 300)),
             0.007843,
@@ -165,55 +148,49 @@ def detection_loop(cap):
             if class_name == 'background':
                 continue
 
-            # get bounding box
-            box      = detections_raw[0, 0, i, 3:7] * np.array([frame_width, frame_height, frame_width, frame_height])
+            box     = detections_raw[0, 0, i, 3:7] * np.array([frame_width, frame_height, frame_width, frame_height])
             x1, y1, x2, y2 = box.astype(int)
             center_x = (x1 + x2) // 2
             center_y = (y1 + y2) // 2
 
-            # ignore objects in top 20% of frame (usually ceiling/sky)
+            # ignore top 20% of frame
             if center_y < frame_height * 0.2:
                 continue
 
-            # get friendly name
-            name = FRIENDLY_NAMES.get(class_name, 'Unknown object')
             zone = get_zone(center_x, frame_width)
+            detections.append({'zone': zone})
 
-            detections.append({
-                'name':       name,
-                'zone':       zone,
-                'confidence': confidence,
-                'center_x':  center_x
-            })
-
-            print(f"Detected: {name} | Zone: {zone} | Confidence: {confidence:.0%}")
+            print(f"Obstacle detected | Zone: {zone} | Confidence: {confidence:.0%}")
 
         instruction = build_instruction(detections)
-        smart_speak(instruction)
+        speak_navigation(instruction)
 
-        time.sleep(0.1)  # small delay between frames
+        time.sleep(0.3)
 
     print("Detection loop stopped")
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── RUN MODE ──────────────────────────────────────────────────────────────────
 def run_navigation_mode():
-    global running
-    running = False  # reset first
-    speak("Mode 1. Active path navigation.")
+    global running, is_speaking, last_message, last_spoke_time
+    running         = True
+    is_speaking     = False
+    last_message    = ''
+    last_spoke_time = 0
+
     cap = open_camera()
     if not cap:
-        speak("Camera not found.")
+        os.system('espeak -s 140 "Camera not found."')
+        running = False
         return None
-    speak("Ready. Navigation starting.")
-    running = True
+
     threading.Thread(target=lambda: detection_loop(cap), daemon=True).start()
     return cap
 
 def stop_navigation(cap):
-    global running
-    running = False
+    global running, is_speaking
+    running     = False
+    is_speaking = False
     if cap:
         cap.release()
-    speak("Navigation stopped.")
 # ─────────────────────────────────────────────────────────────────────────────
