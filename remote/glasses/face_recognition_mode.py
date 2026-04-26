@@ -121,11 +121,10 @@ def open_camera():
     return None
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ── GET FACE ENCODING FROM FRAME ──────────────────────────────────────────────
+# ── GET FACE ENCODING ─────────────────────────────────────────────────────────
 def get_face_encoding(frame):
-    # resize to speed up detection
     small = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
-    rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
+    rgb   = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
     locations = face_recognition.face_locations(rgb)
     print(f"Faces found: {len(locations)}")
     if not locations:
@@ -141,19 +140,25 @@ def try_recognize(frame):
     db = load_faces()
     encoding = get_face_encoding(frame)
 
+    print(f"Encoding found: {encoding is not None}")
+    print(f"DB has {len(db['encodings'])} faces")
+
     if encoding is None:
         return None, False  # no face
 
     if not db['encodings']:
         return None, True  # face found but db empty
 
-    matches = face_recognition.compare_faces(db['encodings'], encoding, tolerance=0.6)
+    matches   = face_recognition.compare_faces(db['encodings'], encoding, tolerance=0.6)
     distances = face_recognition.face_distance(db['encodings'], encoding)
+
+    print(f"Matches: {matches}")
 
     if True in matches:
         best = np.argmin(distances)
         if matches[best]:
-            return db['audio_files'][best], True  # recognized
+            print(f"Recognized: {db['names'][best]}")
+            return db['audio_files'][best], True
 
     return None, True  # face found but unknown
 # ─────────────────────────────────────────────────────────────────────────────
@@ -205,7 +210,9 @@ def run_face_mode():
     else:
         speak("Camera not found.")
     return cap
+# ─────────────────────────────────────────────────────────────────────────────
 
+# ── HANDLE TRIGGER ────────────────────────────────────────────────────────────
 def handle_trigger(cap):
     global face_state, pending_frame
 
@@ -213,23 +220,27 @@ def handle_trigger(cap):
 
     if face_state == 'recognize':
         speak("Scanning.")
-        for _ in range(10):  # flush more frames
+        for _ in range(10):
             ret, frame = cap.read()
         if not ret:
             speak("Failed to capture.")
             return
 
+        print("Calling try_recognize...")
         audio_file, face_found = try_recognize(frame)
+        print(f"Result: audio_file={audio_file}, face_found={face_found}")
 
         if not face_found:
             speak("No face detected. Please try again.")
             return
 
         if audio_file:
+            print("Playing audio...")
             threading.Thread(target=lambda: play_audio(audio_file), daemon=True).start()
         else:
+            print("Unknown face - prompting user")
             pending_frame = frame
-            face_state = 'unknown_prompt'
+            face_state    = 'unknown_prompt'
             speak("Unknown face. Press trigger to register or button 2 to cancel.")
 
     elif face_state == 'unknown_prompt':
@@ -244,12 +255,14 @@ def handle_trigger(cap):
             speak("Failed to capture.")
             return
         pending_frame = frame
-        face_state = 'registering'
+        face_state    = 'registering'
         threading.Thread(
             target=lambda: register_face_with_frame(pending_frame),
             daemon=True
         ).start()
+# ─────────────────────────────────────────────────────────────────────────────
 
+# ── HANDLE BUTTON2 ────────────────────────────────────────────────────────────
 def handle_button2(cap):
     global face_state, pending_frame
     face_state    = 'recognize'
