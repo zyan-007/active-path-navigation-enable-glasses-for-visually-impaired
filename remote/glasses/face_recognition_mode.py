@@ -1,7 +1,6 @@
 '''
 Face Recognition - Mode 2
 Raspberry Pi Version
-New flow - recognize first, register if unknown
 '''
 
 import cv2
@@ -22,16 +21,15 @@ os.makedirs(AUDIO_DIR, exist_ok=True)
 
 # ── AUDIO SETTINGS ────────────────────────────────────────────────────────────
 RECORD_SECONDS = 3
-SAMPLE_RATE    = 16000  # fixed for Pi
+SAMPLE_RATE    = 16000
 CHUNK          = 1024
 CHANNELS       = 1
 FORMAT         = pyaudio.paInt16
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── STATE ─────────────────────────────────────────────────────────────────────
-# states: 'recognize', 'unknown_prompt', 'capture_prompt', 'recording'
-face_state     = 'recognize'
-pending_frame  = None
+face_state    = 'recognize'
+pending_frame = None
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── LOAD / SAVE FACES ─────────────────────────────────────────────────────────
@@ -58,7 +56,6 @@ def speak(text):
 def record_audio(filename):
     p = pyaudio.PyAudio()
 
-    # find working input device
     device_index = None
     for i in range(p.get_device_count()):
         info = p.get_device_info_by_index(i)
@@ -82,7 +79,6 @@ def record_audio(filename):
             frames_per_buffer=CHUNK
         )
 
-        print("Recording...")
         frames = []
         for _ in range(0, int(SAMPLE_RATE / CHUNK * RECORD_SECONDS)):
             data = stream.read(CHUNK, exception_on_overflow=False)
@@ -104,7 +100,7 @@ def record_audio(filename):
     except Exception as e:
         print(f"Recording error: {e}")
         p.terminate()
-        speak("Recording failed. Please try again.")
+        speak("Recording failed.")
         return False
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -125,49 +121,54 @@ def open_camera():
     return None
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ── GET FACE ENCODING FROM FRAME ──────────────────────────────────────────────
+def get_face_encoding(frame):
+    # resize to speed up detection
+    small = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
+    rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
+    locations = face_recognition.face_locations(rgb)
+    print(f"Faces found: {len(locations)}")
+    if not locations:
+        return None
+    encodings = face_recognition.face_encodings(rgb, locations)
+    if not encodings:
+        return None
+    return encodings[0]
+# ─────────────────────────────────────────────────────────────────────────────
+
 # ── RECOGNIZE ─────────────────────────────────────────────────────────────────
 def try_recognize(frame):
     db = load_faces()
-    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    face_locations = face_recognition.face_locations(rgb_frame)
+    encoding = get_face_encoding(frame)
 
-    if not face_locations:
-        return None, False  # no face found
+    if encoding is None:
+        return None, False  # no face
 
-    face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
+    if not db['encodings']:
+        return None, True  # face found but db empty
 
-    for face_encoding in face_encodings:
-        if not db['encodings']:
-            return None, True  # face found but no db
+    matches = face_recognition.compare_faces(db['encodings'], encoding, tolerance=0.6)
+    distances = face_recognition.face_distance(db['encodings'], encoding)
 
-        matches = face_recognition.compare_faces(db['encodings'], face_encoding, tolerance=0.6)
-        distances = face_recognition.face_distance(db['encodings'], face_encoding)
+    if True in matches:
+        best = np.argmin(distances)
+        if matches[best]:
+            return db['audio_files'][best], True  # recognized
 
-        if True in matches:
-            best = np.argmin(distances)
-            if matches[best]:
-                return db['audio_files'][best], True
-
-    return None, True  # face found but not recognized
+    return None, True  # face found but unknown
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── REGISTER ──────────────────────────────────────────────────────────────────
 def register_face_with_frame(frame):
-    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    face_locations = face_recognition.face_locations(rgb_frame)
+    global face_state
+    encoding = get_face_encoding(frame)
 
-    if not face_locations:
+    if encoding is None:
         speak("No face detected. Please try again.")
-        return False
+        face_state = 'capture_prompt'
+        speak("Press confirm to capture face.")
+        return
 
-    encodings = face_recognition.face_encodings(rgb_frame, face_locations)
-    if not encodings:
-        speak("Could not process face. Please try again.")
-        return False
-
-    encoding = encodings[0]
-
-    # countdown before recording
     speak("Say name in")
     speak("3")
     speak("2")
@@ -178,7 +179,8 @@ def register_face_with_frame(frame):
 
     success = record_audio(audio_file)
     if not success:
-        return False
+        face_state = 'recognize'
+        return
 
     db = load_faces()
     db['encodings'].append(encoding)
@@ -186,9 +188,9 @@ def register_face_with_frame(frame):
     db['audio_files'].append(audio_file)
     save_faces(db)
 
+    face_state = 'recognize'
     speak("Face registered.")
     speak("Press button 2 to recognize again.")
-    return True
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── RUN MODE ──────────────────────────────────────────────────────────────────
@@ -207,9 +209,11 @@ def run_face_mode():
 def handle_trigger(cap):
     global face_state, pending_frame
 
+    print(f"Trigger in face state: {face_state}")
+
     if face_state == 'recognize':
-        # flush buffer
-        for _ in range(5):
+        speak("Scanning.")
+        for _ in range(10):  # flush more frames
             ret, frame = cap.read()
         if not ret:
             speak("Failed to capture.")
@@ -222,28 +226,25 @@ def handle_trigger(cap):
             return
 
         if audio_file:
-            # recognized
             threading.Thread(target=lambda: play_audio(audio_file), daemon=True).start()
         else:
-            # unknown face
             pending_frame = frame
             face_state = 'unknown_prompt'
             speak("Unknown face. Press trigger to register or button 2 to cancel.")
 
     elif face_state == 'unknown_prompt':
-        # user pressed trigger - wants to register
         face_state = 'capture_prompt'
         speak("Press confirm to capture face.")
 
     elif face_state == 'capture_prompt':
-        # capture the face now
-        for _ in range(5):
+        speak("Capturing.")
+        for _ in range(10):
             ret, frame = cap.read()
         if not ret:
             speak("Failed to capture.")
             return
         pending_frame = frame
-        face_state = 'recognize'  # reset after registration
+        face_state = 'registering'
         threading.Thread(
             target=lambda: register_face_with_frame(pending_frame),
             daemon=True
@@ -251,7 +252,6 @@ def handle_trigger(cap):
 
 def handle_button2(cap):
     global face_state, pending_frame
-    # cancel and go back to recognize mode
     face_state    = 'recognize'
     pending_frame = None
     speak("Recognition mode. Point camera at face and press confirm.")
