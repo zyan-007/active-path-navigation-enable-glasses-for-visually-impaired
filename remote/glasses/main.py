@@ -10,6 +10,7 @@ import RPi.GPIO as GPIO
 from currency import run_currency_mode, capture_and_identify
 from tts import run_tts_mode, capture_and_read
 from face_recognition_mode import run_face_mode, handle_trigger, handle_button2
+from obstacle_detection import run_navigation_mode, stop_navigation
 
 # ── GLOBAL STATE ──────────────────────────────────────────────────────────────
 cap          = None
@@ -117,6 +118,17 @@ def phase3_ready():
     time.sleep(1)
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ── RELEASE CAP ───────────────────────────────────────────────────────────────
+def release_current():
+    global cap, current_mode
+    if current_mode == 'navigation':
+        stop_navigation(cap)
+    elif cap:
+        cap.release()
+    cap          = None
+    current_mode = None
+# ─────────────────────────────────────────────────────────────────────────────
+
 # ── PHASE 4 - LISTEN ──────────────────────────────────────────────────────────
 def phase4_listen():
     global cap, current_mode
@@ -128,17 +140,27 @@ def phase4_listen():
             if GPIO.input(pin) == GPIO.LOW and debounce(pin):
                 print(f"Button pressed: GPIO {pin}")
 
-                if pin == BUTTON2:
+                if pin == BUTTON1:
+                    if current_mode == 'navigation':
+                        # toggle off
+                        release_current()
+                        speak_async("Navigation stopped.")
+                    else:
+                        release_current()
+                        current_mode = 'navigation'
+                        def start_navigation():
+                            global cap
+                            cap = run_navigation_mode()
+                        threading.Thread(target=start_navigation, daemon=True).start()
+
+                elif pin == BUTTON2:
                     if current_mode == 'face':
-                        # already in face mode - handle button2
                         threading.Thread(
                             target=lambda: handle_button2(cap),
                             daemon=True
                         ).start()
                     else:
-                        if cap:
-                            cap.release()
-                            cap = None
+                        release_current()
                         current_mode = 'face'
                         def start_face():
                             global cap
@@ -146,20 +168,16 @@ def phase4_listen():
                         threading.Thread(target=start_face, daemon=True).start()
 
                 elif pin == BUTTON3:
-                    if cap:
-                        cap.release()
-                        cap = None
-                    current_mode = "currency"
+                    release_current()
+                    current_mode = 'currency'
                     def start_currency():
                         global cap
                         cap = run_currency_mode()
                     threading.Thread(target=start_currency, daemon=True).start()
 
                 elif pin == BUTTON4:
-                    if cap:
-                        cap.release()
-                        cap = None
-                    current_mode = "tts"
+                    release_current()
+                    current_mode = 'tts'
                     def start_tts():
                         global cap
                         cap = run_tts_mode()
@@ -181,16 +199,10 @@ def phase4_listen():
                             target=lambda: handle_trigger(cap),
                             daemon=True
                         ).start()
+                    elif current_mode == "navigation":
+                        speak_async("Navigation is running.")
                     else:
                         speak_async(BUTTON_MESSAGES[TRIGGER])
-
-                else:
-                    if cap:
-                        cap.release()
-                        cap = None
-                    current_mode = None
-                    message = BUTTON_MESSAGES.get(pin, "Unknown")
-                    speak_async(message)
 
         time.sleep(0.05)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -207,7 +219,6 @@ try:
 except KeyboardInterrupt:
     print("Stopped")
 finally:
-    if cap:
-        cap.release()
+    release_current()
     all_off()
     GPIO.cleanup()
