@@ -14,6 +14,10 @@ os.environ['GEMINI_API_KEY'] = 'YOUR_KEY'
 client = genai.Client()
 # ─────────────────────────────────────────────────────────────────────────────
 
+def speak(text):
+    print(f">> {text}")
+    os.system(f'espeak -s 140 "{text}"')  # blocking - waits until done
+
 def ask_gemini(frame):
     _, buffer = cv2.imencode('.jpg', frame)
     image_bytes = bytes(buffer)
@@ -21,7 +25,7 @@ def ask_gemini(frame):
     try:
         print("Sending to Gemini...")
         response = client.models.generate_content(
-            model="gemini-2.0-flash-lite",
+            model="gemini-3.1-flash-lite-preview",
             contents=[
                 types.Content(
                     role="user",
@@ -51,8 +55,10 @@ def ask_gemini(frame):
             return "API key error. Please check your key."
         elif 'timeout' in error:
             return "Connection timed out. Please try again."
+        elif 'network' in error or 'connection' in error:
+            return "No internet connection. Please check your network."
         else:
-            return "Error identifying currency. Please try again."
+            return "Error. Please try again."
 
 # ── CAMERA ────────────────────────────────────────────────────────────────────
 cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
@@ -61,9 +67,11 @@ cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
 if not cap.isOpened():
     print("Camera not found")
+    speak("Camera not found")
     exit()
 
 print("Camera ready. Press SPACE to identify. Q to quit.")
+speak("Camera ready. Press confirm to identify currency.")
 
 while True:
     ret, frame = cap.read()
@@ -77,8 +85,10 @@ while True:
 
     if key == ord(' '):
         print("Capturing...")
+        speak("Identifying. Please wait.")
         result = ask_gemini(frame)
         print(f"Result: {result}")
+        speak(result)
 
     elif key == ord('q'):
         break
